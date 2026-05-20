@@ -624,7 +624,8 @@ export function renderApp(state: AppViewState) {
         <nav class="top-tabs" aria-label="Primary navigation">
           ${[
             { tab: "message", label: "消息" },
-            { tab: "agentSwarm", label: "AgentSwarm", beta: true },
+            // 暂不开放 AgentSwarm 顶栏入口，后期再启用
+            // { tab: "agentSwarm", label: "AgentSwarm", beta: true },
             { tab: "scheduledTasks", label: "定时任务" },
             { tab: "employeeMarket", label: "员工市场" },
             { tab: "skillLibrary", label: "技能库" },
