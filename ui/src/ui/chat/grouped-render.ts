@@ -11,7 +11,7 @@ import {
   formatReasoningMarkdown,
 } from "./message-extract.ts";
 import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer.ts";
-import { extractToolCards, renderToolCardSidebar } from "./tool-cards.ts";
+import { extractToolCards } from "./tool-cards.ts";
 
 type ImageBlock = {
   url: string;
@@ -340,70 +340,124 @@ function toggleToolResultBody(e: Event) {
   block?.classList.toggle("chat-tool-result-block--open", next);
 }
 
+
+function toolCommandText(card: ToolCard): string {
+  const args = card.args;
+  if (args && typeof args === "object") {
+    const rec = args as Record<string, unknown>;
+    for (const key of ["command", "cmd", "script", "query", "path"]) {
+      const value = rec[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+  if (typeof args === "string" && args.trim()) {
+    return args.trim();
+  }
+  if (card.text?.trim()) {
+    return card.text.trim().split(/\r?\n/, 1)[0] ?? "";
+  }
+  return card.name;
+}
+
+function extractToolOutputText(doc: string): string {
+  const trimmed = doc.trim();
+  if (!trimmed.startsWith("{")) {
+    return doc;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (typeof parsed.output === "string" && parsed.output.trim()) {
+      return parsed.output;
+    }
+    const nested = parsed.data as Record<string, unknown> | undefined;
+    if (typeof nested?.output === "string" && nested.output.trim()) {
+      return nested.output;
+    }
+  } catch {
+    return doc;
+  }
+  return doc;
+}
+
+function formatToolRunLabel(cards: ToolCard[]): string {
+  const count = cards.filter((c) => c.kind === "call").length || cards.length;
+  return count <= 1 ? "已运行命令" : `已运行 ${count} 条命令`;
+}
+
+function renderInlineToolCall(card: ToolCard) {
+  const command = toolCommandText(card);
+  const label = command ? `已运行 ${command}` : "已运行命令";
+  return html`
+    <div class="chat-tool-run chat-tool-run--call">
+      <div class="chat-tool-run__summary">
+        <span class="chat-tool-run__icon">${icons.wrench}</span>
+        <span class="chat-tool-run__title">${label}</span>
+        <span class="chat-tool-run__status">${icons.check}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderCollapsedToolResult(
   toolCards: ToolCard[],
   images: ImageBlock[],
   markdown: string | null,
   reasoningMarkdown: string | null,
   opts: { isStreaming: boolean; showReasoning: boolean },
-  onOpenSidebar?: (content: string) => void,
+  _onOpenSidebar?: (content: string) => void,
 ) {
   const bodyDoc = mergeToolExpandableBody(markdown, toolCards);
   const hasExpandable =
     Boolean(bodyDoc?.trim()) ||
     images.length > 0 ||
     Boolean(reasoningMarkdown?.trim());
-
-  const toolsInner = toolCards.length
-    ? toolCards.map((c) =>
-        renderToolCardSidebar(c, onOpenSidebar, { suppressResultOutput: true }),
-      )
-    : html`<div class="chat-tool-result-placeholder muted">工具输出</div>`;
+  const primaryCommand =
+    toolCards
+      .filter((card) => card.kind === "call")
+      .map(toolCommandText)
+      .find(Boolean) ?? "";
+  const runLabel = toolCards.length ? formatToolRunLabel(toolCards) : "已运行命令";
+  const outputText = bodyDoc?.trim() ? extractToolOutputText(bodyDoc) : "";
 
   return html`
     <div class="chat-tool-result-block">
-      <div class="chat-tool-result-main chat-bubble fade-in ${opts.isStreaming ? "streaming" : ""}">
-        <div class="chat-tool-result-row">
-          <button
-            type="button"
-            class="btn btn--icon chat-tool-result-toggle"
-            aria-expanded="false"
-            aria-label=${hasExpandable ? "展开工具输出详情" : "无详情可展开"}
-            title=${hasExpandable ? "展开工具输出" : "无输出正文"}
-            ?disabled=${!hasExpandable}
-            @click=${toggleToolResultBody}
-          >
-            ${icons.chevronRight}
-          </button>
-          <div class="chat-tool-result-tools">${toolsInner}</div>
-        </div>
-      </div>
-      ${
-        hasExpandable
-          ? html`
-              <div class="chat-tool-result-body" hidden>
-                ${
-                  opts.showReasoning && reasoningMarkdown
-                    ? html`
-                        <details class="chat-thinking" open>
-                          <summary class="chat-thinking__summary">思考过程</summary>
-                          <div class="chat-thinking__content">
-                            ${unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
-                          </div>
-                        </details>
-                      `
-                    : nothing
-                }
-                ${renderMessageImages(images)}
-                ${
-                  bodyDoc?.trim()
-                    ? html`<div class="chat-text">${unsafeHTML(toSanitizedMarkdownHtml(bodyDoc))}</div>`
-                    : nothing
-                }
-              </div>
-            `
-          : nothing
-      }
+      <details class="chat-tool-run" ?open=${hasExpandable}>
+        <summary class="chat-tool-run__summary">
+          <span class="chat-tool-run__icon">${icons.wrench}</span>
+          <span class="chat-tool-run__title">${runLabel}</span>
+          <span class="chat-tool-run__chevron">${icons.chevronRight}</span>
+        </summary>
+        ${
+          primaryCommand
+            ? html`<div class="chat-tool-run__command muted">已运行 ${primaryCommand}</div>`
+            : nothing
+        }
+        ${
+          opts.showReasoning && reasoningMarkdown
+            ? html`
+                <details class="chat-thinking" open>
+                  <summary class="chat-thinking__summary">Reasoning</summary>
+                  <div class="chat-thinking__content">
+                    ${unsafeHTML(toSanitizedMarkdownHtml(reasoningMarkdown))}
+                  </div>
+                </details>
+              `
+            : nothing
+        }
+        ${renderMessageImages(images)}
+        ${
+          outputText
+            ? html`
+                <div class="chat-tool-run__panel">
+                  <div class="chat-tool-run__panel-title">Shell</div>
+                  <pre class="chat-tool-run__output">${outputText}</pre>
+                </div>
+              `
+            : nothing
+        }
+      </details>
     </div>
   `;
 }
@@ -488,7 +542,9 @@ function renderGroupedMessage(
           ? html`<div class="chat-text">${unsafeHTML(toSanitizedMarkdownHtml(markdown))}</div>`
           : nothing
       }
-      ${opts.showToolTrace ? toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar)) : nothing}
+      ${opts.showToolTrace
+        ? toolCards.filter((card) => card.kind === "call").map(renderInlineToolCall)
+        : nothing}
     </div>
   `;
 }

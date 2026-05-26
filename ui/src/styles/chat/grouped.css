@@ -306,9 +306,109 @@ img.chat-avatar {
 .chat-tool-result-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   align-self: stretch;
+}
+
+.chat-tool-run {
+  display: grid;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.chat-tool-run__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--text-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.chat-tool-run__summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tool-run__icon,
+.chat-tool-run__chevron,
+.chat-tool-run__status {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--text-placeholder);
+}
+
+.chat-tool-run__icon svg,
+.chat-tool-run__chevron svg,
+.chat-tool-run__status svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+
+.chat-tool-run__title {
+  line-height: 20px;
+}
+
+.chat-tool-run__chevron {
+  transition: transform 150ms ease;
+}
+
+.chat-tool-run[open] .chat-tool-run__chevron {
+  transform: rotate(90deg);
+}
+
+.chat-tool-run__status {
+  color: var(--success);
+}
+
+.chat-tool-run--call {
+  margin-top: 8px;
+}
+
+.chat-tool-run__command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(760px, 100%);
+}
+
+.chat-tool-run__panel {
+  width: min(760px, 100%);
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #ececec;
+  color: #202124;
+}
+
+.chat-tool-run__panel-title {
+  padding: 8px 10px 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.chat-tool-run__output {
+  margin: 0;
+  padding: 12px 14px 16px;
+  overflow: visible;
+  background: transparent;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+:root[data-theme="dark"] .chat-tool-run__panel {
+  background: color-mix(in srgb, var(--text-primary) 10%, var(--bg));
+  color: var(--text-regular);
 }
 
 .chat-tool-result-main {
