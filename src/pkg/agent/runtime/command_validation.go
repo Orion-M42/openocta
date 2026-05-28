@@ -12,12 +12,19 @@ import (
 
 var errEmptyCommand = errors.New("empty command")
 
+var errMultilineCommand = errors.New("命令包含换行符，仅支持单行命令。请用 '&&' 或 ';' 连接多命令，例如: mkdir dir && echo done")
+
 // ValidateCommandWithConfig validates a shell command string using OpenOcta sandbox.validator rules.
 // It is intentionally conservative: blocks control chars and shell metacharacters by default.
 func ValidateCommandWithConfig(command string, cfg *config.SandboxValidatorConfig) error {
 	cmd := strings.TrimSpace(command)
 	if cmd == "" {
 		return errEmptyCommand
+	}
+
+	// 检测换行符，返回友好错误引导 LLM 重试
+	if strings.Contains(cmd, "\n") || strings.Contains(cmd, "\r") {
+		return errMultilineCommand
 	}
 
 	maxLen := 4096

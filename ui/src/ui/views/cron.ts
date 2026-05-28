@@ -56,6 +56,35 @@ function normalizeEmployeeIdForCron(raw: string): string {
   return s.trim().toLowerCase();
 }
 
+function showCronToTooltip(e: Event) {
+  const target = e.currentTarget as HTMLElement;
+  const hint = target.classList.contains("mcp-field-hint")
+    ? target
+    : (target.closest(".mcp-field-hint") as HTMLElement);
+  if (!hint) return;
+  const tooltip = hint.querySelector(".mcp-field-hint__tooltip") as HTMLElement;
+  if (!tooltip) return;
+  const rect = hint.getBoundingClientRect();
+  tooltip.style.left = rect.left + "px";
+  tooltip.style.top = rect.bottom + 6 + "px";
+  tooltip.classList.add("is-visible");
+}
+
+function hideCronToTooltip(e: Event) {
+  const target = e.currentTarget as HTMLElement;
+  const hint = target.classList.contains("mcp-field-hint")
+    ? target
+    : (target.closest(".mcp-field-hint") as HTMLElement);
+  if (!hint) return;
+  const tooltip = hint.querySelector(".mcp-field-hint__tooltip") as HTMLElement;
+  if (!tooltip) return;
+  window.setTimeout(() => {
+    if (!hint.matches(":hover") && !tooltip.matches(":hover")) {
+      tooltip.classList.remove("is-visible");
+    }
+  }, 50);
+}
+
 function buildChannelOptions(props: CronProps): string[] {
   const options = ["last", ...props.channels.filter(Boolean)];
   const current = props.form.deliveryChannel?.trim();
@@ -431,15 +460,24 @@ function renderCronForm(props: CronProps) {
                         </select></span>
                       </label>
                       <label class="field">
-                        <span>${t("cronTo")}</span>
+                        <span style="display: inline-flex; align-items: center; gap: 4px;">
+                          ${t("cronTo")}
+                          <span class="mcp-field-hint" @mouseenter=${showCronToTooltip} @mouseleave=${hideCronToTooltip}>
+                            ${icons.info}
+                            <span class="mcp-field-hint__tooltip" @mouseenter=${showCronToTooltip} @mouseleave=${hideCronToTooltip}>
+                              ${t("cronToTooltip")}
+                            </span>
+                          </span>
+                        </span>
                         <span class="input"><input
                           .value=${props.form.deliveryTo}
                           @input=${(e: Event) =>
                             props.onFormChange({
                               deliveryTo: (e.target as HTMLInputElement).value,
                             })}
-                          placeholder="+1555… or chat id"
+                          placeholder=${t("cronToPlaceholder")}
                         /></span>
+                        <div class="muted" style="font-size: 11px; margin-top: 2px;">${t("cronToHint")}</div>
                       </label>
                     `
                   : nothing

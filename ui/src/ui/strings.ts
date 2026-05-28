@@ -631,6 +631,9 @@ type Strings = {
   cronNoneInternal: string;
   cronChannel: string;
   cronTo: string;
+  cronToPlaceholder: string;
+  cronToHint: string;
+  cronToTooltip: string;
   cronAddJob: string;
   cronJobsTitle: string;
   cronJobsSub: string;
@@ -1626,6 +1629,9 @@ const EN: Strings = {
   cronNoneInternal: "None (internal)",
   cronChannel: "Channel",
   cronTo: "To",
+  cronToPlaceholder: "Chat/User ID (e.g. oc_xxx, ou_xxx for Feishu)",
+  cronToHint: "Enter the platform's original chat/user ID, not session key.",
+  cronToTooltip: "Platform chat/user ID examples:\n• Feishu: oc_xxx (group), ou_xxx (user)\n• DingTalk: group chat ID or user ID\n• WeChat: group chat ID or wxid_xxx\n• QQ Bot: QQ number\n\nDo NOT use session key (e.g. agent:main:channel:...).",
   cronAddJob: "Add job",
   cronJobsTitle: "Jobs",
   cronJobsSub: "All scheduled jobs stored in the gateway.",
@@ -2615,6 +2621,9 @@ const ZH: Strings = {
   cronNoneInternal: "无（内部）",
   cronChannel: "通道",
   cronTo: "发送至",
+  cronToPlaceholder: "群聊/用户 ID（如飞书 oc_xxx、ou_xxx）",
+  cronToHint: "请输入平台原始 ID，不要输入会话 key。",
+  cronToTooltip: "各平台群聊/用户 ID 示例：\n• 飞书：oc_xxx（群聊）、ou_xxx（用户）\n• 钉钉：群聊 ID 或用户 ID\n• 微信：群聊 ID 或 wxid_xxx\n• QQ Bot：QQ 号码\n\n请勿使用会话 key（如 agent:main:channel:...）。",
   cronAddJob: "添加任务",
   cronJobsTitle: "任务列表",
   cronJobsSub: "网关中所有已调度任务",
