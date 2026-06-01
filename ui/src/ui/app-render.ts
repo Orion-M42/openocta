@@ -685,6 +685,28 @@ export function renderApp(state: AppViewState) {
           <div class="pill pill--link topbar__no-drag">
             <button
               type="button"
+              title="打开 OpenOcta 企业版"
+              class="topbar-link topbar__no-drag"
+              @click=${() =>
+                void openExternalUrl("https://openocta.com/amc", {
+                  gatewayHost: state.settings.gatewayUrl,
+                  gatewayToken: state.settings.token,
+                })}
+            >
+              <img
+                class="topbar-link__img"
+                src="/logo.png"
+                alt=""
+                width="16"
+                height="16"
+                aria-hidden="true"
+              />
+              <span class="topbar-link__label">企业版</span>
+            </button>
+          </div>
+          <div class="pill pill--link topbar__no-drag">
+            <button
+              type="button"
               title="打开 GitHub 仓库"
               class="topbar-link topbar__no-drag"
               @click=${() =>
