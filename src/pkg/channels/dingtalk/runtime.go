@@ -108,9 +108,9 @@ func (r *Runtime) Send(msg *channels.RuntimeOutboundMessage) error {
 		return fmt.Errorf("dingtalk runtime: not running")
 	}
 
-	chatID := msg.ChatID
+	chatID := strings.ToLower(msg.ChatID)
 	if chatID == "" {
-		chatID = msg.MetadataString("chat_id")
+		chatID = strings.ToLower(msg.MetadataString("chat_id"))
 	}
 	if chatID == "" {
 		r.logger.Error("Send failed: chatID is required")
@@ -207,10 +207,10 @@ func (r *Runtime) onChatBotMessageReceived(ctx context.Context, data *chatbot.Bo
 	senderNick := data.SenderNick
 
 	// 私聊：chatID 使用 senderID；群聊：使用 ConversationId
-	chatID := senderID
+	chatID := strings.ToLower(senderID)
 	chatType := "dm"
 	if data.ConversationType != "1" {
-		chatID = data.ConversationId
+		chatID = strings.ToLower(data.ConversationId)
 		chatType = "group"
 	}
 
