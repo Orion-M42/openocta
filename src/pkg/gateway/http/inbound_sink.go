@@ -47,6 +47,7 @@ func (s *hooksAgentSink) Deliver(_ context.Context, msg *channels.InboundMessage
 	if to == "" {
 		to = msg.SenderID
 	}
+	to = strings.ToLower(to) // 统一转小写，避免大小写不一致
 
 	// 默认 sessionKey：agent:main:channel:<channelId>:<peerId>
 	// 当该渠道配置了 digitalEmployeeId 且员工未被删除时，使用数字员工会话：
