@@ -1186,6 +1186,16 @@ func ChatSendHandler(opts HandlerOpts) error {
 	}
 	if timeoutMs <= 0 {
 		cfg := loadConfigFromContext(opts.Context)
+		// 诊断日志：记录超时配置解析结果（用于排查定时任务超时问题）
+		if cfg != nil && cfg.Env != nil && cfg.Env.Vars != nil {
+			chatLog.Info("chat.send timeout config: sessionKey=%s timeout=%s vars=%v",
+				sessionKey,
+				cfg.Env.Vars["OPENOCTA_AGENT_RUN_TIMEOUT"],
+				cfg.Env.Vars)
+		} else {
+			chatLog.Info("chat.send timeout config: sessionKey=%s cfgNil=%v envNil=%v varsNil=%v",
+				sessionKey, cfg == nil, cfg != nil && cfg.Env == nil, cfg != nil && cfg.Env != nil && cfg.Env.Vars == nil)
+		}
 		if d := runtime.DefaultAgentRunDuration(os.Getenv, cfg); d > 0 {
 			timeoutMs = int(d / time.Millisecond)
 		} else {
