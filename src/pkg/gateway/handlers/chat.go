@@ -21,18 +21,149 @@ import (
 	"github.com/openocta/openocta/pkg/agent"
 	"github.com/openocta/openocta/pkg/agent/runtime"
 	"github.com/openocta/openocta/pkg/agent/tools"
+	"github.com/openocta/openocta/pkg/browser"
 	"github.com/openocta/openocta/pkg/channels"
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/employees"
 	"github.com/openocta/openocta/pkg/gateway/protocol"
 	"github.com/openocta/openocta/pkg/logging"
 	"github.com/openocta/openocta/pkg/session"
+	"github.com/stellarlinkco/agentsdk-go/pkg/a2ui"
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
 	sdkTool "github.com/stellarlinkco/agentsdk-go/pkg/tool"
 )
 
 var chatLog = logging.Sub("chat")
+
+const chatAttachmentMaxBytes = 1 << 20 // 1 MiB
+
+var (
+	chatAttachmentBlockedExt = map[string]struct{}{
+		".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".gzip": {},
+		".bz2": {}, ".bzip2": {}, ".xz": {}, ".tgz": {}, ".tbz": {}, ".tbz2": {},
+		".tar.gz": {}, ".tar.bz2": {}, ".tar.xz": {}, ".iso": {}, ".dmg": {},
+		".apk": {}, ".deb": {}, ".rpm": {}, ".exe": {}, ".msi": {}, ".bin": {},
+		".jar": {}, ".war": {}, ".cab": {}, ".lz": {}, ".lzma": {}, ".zst": {},
+	}
+	chatAttachmentAllowedExt = map[string]struct{}{
+		".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".webp": {}, ".bmp": {}, ".svg": {},
+		".pdf": {}, ".txt": {}, ".md": {}, ".markdown": {}, ".csv": {}, ".json": {},
+		".xml": {}, ".html": {}, ".htm": {},
+		".doc": {}, ".docx": {}, ".xls": {}, ".xlsx": {}, ".ppt": {}, ".pptx": {}, ".rtf": {},
+	}
+)
+
+func chatAttachmentExtension(filename string) string {
+	lower := strings.ToLower(strings.TrimSpace(filename))
+	for ext := range chatAttachmentBlockedExt {
+		if strings.HasSuffix(lower, ext) {
+			return ext
+		}
+	}
+	return strings.ToLower(filepath.Ext(lower))
+}
+
+func isBlockedChatAttachmentMime(mimeType string) bool {
+	lower := strings.ToLower(strings.TrimSpace(mimeType))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "zip") ||
+		strings.Contains(lower, "x-rar") ||
+		strings.Contains(lower, "x-7z-compressed") ||
+		strings.Contains(lower, "x-7z") ||
+		strings.Contains(lower, "x-tar") ||
+		strings.Contains(lower, "gzip") ||
+		strings.Contains(lower, "x-bzip")
+}
+
+func validateChatAttachmentMeta(filename, mimeType string, sizeBytes int) error {
+	if sizeBytes <= 0 {
+		return fmt.Errorf("attachment is empty")
+	}
+	if sizeBytes > chatAttachmentMaxBytes {
+		return fmt.Errorf("attachment exceeds max size (%d bytes)", chatAttachmentMaxBytes)
+	}
+	if isBlockedChatAttachmentMime(mimeType) {
+		return fmt.Errorf("compressed attachment type is not allowed")
+	}
+	ext := chatAttachmentExtension(filename)
+	if ext == "" {
+		return fmt.Errorf("attachment filename must have an allowed extension")
+	}
+	if _, blocked := chatAttachmentBlockedExt[ext]; blocked {
+		return fmt.Errorf("compressed or unsupported attachment type: %s", ext)
+	}
+	if _, ok := chatAttachmentAllowedExt[ext]; !ok {
+		return fmt.Errorf("unsupported attachment type: %s", ext)
+	}
+	return nil
+}
+
+func decodeChatAttachmentBase64(dataUrl, contentRaw string) ([]byte, error) {
+	var base64Data string
+	if strings.TrimSpace(dataUrl) != "" {
+		parts := strings.SplitN(dataUrl, ",", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid dataUrl")
+		}
+		base64Data = strings.TrimSpace(parts[1])
+	} else {
+		base64Data = strings.TrimSpace(contentRaw)
+	}
+	if base64Data == "" {
+		return nil, fmt.Errorf("attachment content is empty")
+	}
+	base64Data = strings.ReplaceAll(base64Data, "\r", "")
+	base64Data = strings.ReplaceAll(base64Data, "\n", "")
+	dec, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		dec, err = base64.RawStdEncoding.DecodeString(base64Data)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return dec, nil
+}
+
+func inferAttachmentSaveExtension(filename, mimeType string) string {
+	if ext := filepath.Ext(filename); ext != "" {
+		return ext
+	}
+	switch {
+	case strings.HasPrefix(mimeType, "image/png"):
+		return ".png"
+	case strings.HasPrefix(mimeType, "image/jpeg"):
+		return ".jpg"
+	case strings.HasPrefix(mimeType, "image/gif"):
+		return ".gif"
+	case strings.HasPrefix(mimeType, "image/webp"):
+		return ".webp"
+	case strings.HasPrefix(mimeType, "image/bmp"):
+		return ".bmp"
+	case strings.HasPrefix(mimeType, "image/svg+xml"):
+		return ".svg"
+	case mimeType == "application/pdf":
+		return ".pdf"
+	case mimeType == "text/plain":
+		return ".txt"
+	case strings.Contains(mimeType, "markdown"):
+		return ".md"
+	case mimeType == "text/csv":
+		return ".csv"
+	case mimeType == "application/json":
+		return ".json"
+	case strings.Contains(mimeType, "wordprocessingml"):
+		return ".docx"
+	case strings.Contains(mimeType, "spreadsheetml"):
+		return ".xlsx"
+	case strings.Contains(mimeType, "presentationml"):
+		return ".pptx"
+	default:
+		return ""
+	}
+}
 
 // xunfeiProviderName extracts the provider name from a modelRef string
 // (e.g. "xunfei/spark-lite" → "xunfei"). Returns empty string if no slash.
@@ -68,6 +199,40 @@ type ChatAbortController struct {
 // chatAbortControllers stores active chat runs by runId.
 // TODO: This should be part of Context for proper lifecycle management.
 var chatAbortControllers = sync.Map{} // map[string]*ChatAbortController
+
+// formatStreamToolResultOutput normalizes tool output for UI broadcast. Bash and similar
+// tools may return structured maps with empty "output" but metadata (command, exit_code).
+func formatStreamToolResultOutput(output interface{}) string {
+	if output == nil {
+		return ""
+	}
+	if s, ok := output.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	switch m := output.(type) {
+	case map[string]interface{}:
+		if out, ok := m["output"].(string); ok && strings.TrimSpace(out) != "" {
+			return out
+		}
+		if meta, ok := m["metadata"].(map[string]interface{}); ok {
+			if errMsg, ok := meta["error"].(string); ok && strings.TrimSpace(errMsg) != "" {
+				return errMsg
+			}
+			if data, ok := meta["data"].(map[string]interface{}); ok {
+				cmd, _ := data["command"].(string)
+				cmd = strings.TrimSpace(cmd)
+				if cmd != "" {
+					return fmt.Sprintf("(command completed successfully with no output)\n$ %s\nexit_code=0", cmd)
+				}
+			}
+		}
+		b, _ := json.Marshal(m)
+		return string(b)
+	default:
+		b, _ := json.Marshal(output)
+		return string(b)
+	}
+}
 
 // nextChatSeq increments and returns the next sequence number for a chat run.
 func nextChatSeq(agentRunSeq map[string]int64, runId string) int64 {
@@ -115,6 +280,266 @@ func broadcastChatDelta(ctx *Context, runId string, sessionKey string, accumulat
 				{"type": "text", "text": accumulatedText},
 			},
 		},
+	}
+	ctx.Broadcast("chat", payload, nil)
+	if ctx.NodeSendToSession != nil {
+		ctx.NodeSendToSession(sessionKey, "chat", payload)
+	}
+}
+
+// broadcastChatA2UI streams an A2UI v0.9 server message to Web/UI clients.
+func broadcastChatA2UI(ctx *Context, runId string, sessionKey string, a2uiMessage json.RawMessage) {
+	if ctx == nil || ctx.Broadcast == nil || len(a2uiMessage) == 0 {
+		return
+	}
+	seq := int64(0)
+	if ctx.AgentRunSeq != nil {
+		seq = nextChatSeq(ctx.AgentRunSeq, runId)
+	}
+	var parsed map[string]interface{}
+	_ = json.Unmarshal(a2uiMessage, &parsed)
+	payload := map[string]interface{}{
+		"runId":      runId,
+		"sessionKey": sessionKey,
+		"seq":        seq,
+		"state":      "a2ui",
+		"a2ui":       parsed,
+		"message": map[string]interface{}{
+			"role": "assistant",
+			"content": []map[string]interface{}{
+				{"type": "a2ui", "a2ui": parsed},
+			},
+		},
+	}
+	ctx.Broadcast("chat", payload, nil)
+	if ctx.NodeSendToSession != nil {
+		ctx.NodeSendToSession(sessionKey, "chat", payload)
+	}
+}
+
+func contentBlockToClientFormat(b session.ContentBlock) map[string]interface{} {
+	typ := strings.ToLower(strings.TrimSpace(b.Type))
+	switch typ {
+	case "image":
+		out := map[string]interface{}{
+			"type": "image",
+		}
+		if b.Data != "" {
+			mediaType := b.MimeType
+			if mediaType == "" {
+				mediaType = "image/png"
+			}
+			out["source"] = map[string]interface{}{
+				"type":       "base64",
+				"media_type": mediaType,
+				"data":       b.Data,
+			}
+		}
+		if b.Filename != "" {
+			out["filename"] = b.Filename
+		}
+		if b.URL != "" {
+			out["url"] = b.URL
+		}
+		return out
+	case "document", "file", "attachment":
+		out := map[string]interface{}{
+			"type":     "file",
+			"mimeType": b.MimeType,
+			"filename": b.Filename,
+		}
+		if b.Name != "" && b.Filename == "" {
+			out["filename"] = b.Name
+		}
+		if b.Data != "" {
+			out["source"] = map[string]interface{}{
+				"type":       "base64",
+				"media_type": b.MimeType,
+				"data":       b.Data,
+			}
+		}
+		if b.URL != "" {
+			out["url"] = b.URL
+		}
+		if b.Text != "" {
+			out["text"] = b.Text
+		}
+		return out
+	case "a2ui":
+		if len(b.A2UI) == 0 {
+			return map[string]interface{}{"type": "a2ui"}
+		}
+		var parsed interface{}
+		if json.Unmarshal(b.A2UI, &parsed) == nil {
+			return map[string]interface{}{"type": "a2ui", "a2ui": parsed}
+		}
+		return map[string]interface{}{"type": "a2ui", "a2ui": json.RawMessage(b.A2UI)}
+	case "thinking":
+		return map[string]interface{}{"type": "thinking", "thinking": b.Thinking}
+	case "toolcall", "tool_call", "tooluse", "tool_use":
+		out := map[string]interface{}{
+			"type": "toolCall",
+			"name": b.Name,
+			"id":   b.ID,
+		}
+		if len(b.Arguments) > 0 {
+			var args interface{}
+			if json.Unmarshal(b.Arguments, &args) == nil {
+				out["arguments"] = args
+			} else {
+				out["arguments"] = json.RawMessage(b.Arguments)
+			}
+		}
+		return out
+	case "toolresult", "tool_result":
+		out := map[string]interface{}{
+			"type": "toolResult",
+			"name": b.Name,
+			"text": b.Text,
+		}
+		if b.IsError {
+			out["isError"] = true
+		}
+		return out
+	default:
+		out := map[string]interface{}{"type": b.Type}
+		if b.Text != "" {
+			out["text"] = b.Text
+		}
+		if b.Thinking != "" {
+			out["thinking"] = b.Thinking
+		}
+		if b.Name != "" {
+			out["name"] = b.Name
+		}
+		if b.ID != "" {
+			out["id"] = b.ID
+		}
+		if len(b.Arguments) > 0 {
+			var args interface{}
+			if json.Unmarshal(b.Arguments, &args) == nil {
+				out["arguments"] = args
+			}
+		}
+		if b.MimeType != "" {
+			out["mimeType"] = b.MimeType
+		}
+		if b.Filename != "" {
+			out["filename"] = b.Filename
+		}
+		if b.Data != "" {
+			out["source"] = map[string]interface{}{
+				"type":       "base64",
+				"media_type": b.MimeType,
+				"data":       b.Data,
+			}
+		}
+		if b.URL != "" {
+			out["url"] = b.URL
+		}
+		if len(b.A2UI) > 0 {
+			var parsed interface{}
+			if json.Unmarshal(b.A2UI, &parsed) == nil {
+				out["a2ui"] = parsed
+			}
+		}
+		return out
+	}
+}
+
+func transcriptMessageToClientFormat(m session.TranscriptMessage) map[string]interface{} {
+	content := make([]interface{}, 0, len(m.Content))
+	for _, b := range m.Content {
+		content = append(content, contentBlockToClientFormat(b))
+	}
+	msgMap := map[string]interface{}{
+		"role":      m.Role,
+		"content":   content,
+		"timestamp": m.Timestamp,
+	}
+	if m.DurationMs != nil {
+		msgMap["durationMs"] = *m.DurationMs
+	}
+	if m.FirstTokenMs != nil {
+		msgMap["firstTokenMs"] = *m.FirstTokenMs
+	}
+	if m.ToolDurationMs != nil {
+		msgMap["toolDurationMs"] = *m.ToolDurationMs
+	}
+	if m.OutputDurationMs != nil {
+		msgMap["outputDurationMs"] = *m.OutputDurationMs
+	}
+	if m.ToolCallID != "" {
+		msgMap["toolCallId"] = m.ToolCallID
+	}
+	if m.ToolName != "" {
+		msgMap["toolName"] = m.ToolName
+	}
+	if m.IsError {
+		msgMap["isError"] = true
+	}
+	if m.Model != "" {
+		msgMap["model"] = m.Model
+	}
+	if m.Provider != "" {
+		msgMap["provider"] = m.Provider
+	}
+	if m.StopReason != "" {
+		msgMap["stopReason"] = m.StopReason
+	}
+	if m.Usage != nil {
+		total := m.Usage.TotalTokens
+		if total == 0 {
+			total = m.Usage.Input + m.Usage.Output + m.Usage.CacheRead + m.Usage.CacheWrite
+		}
+		msgMap["usage"] = map[string]interface{}{
+			"input":       m.Usage.Input,
+			"output":      m.Usage.Output,
+			"cacheRead":   m.Usage.CacheRead,
+			"cacheWrite":  m.Usage.CacheWrite,
+			"totalTokens": total,
+		}
+	}
+	return msgMap
+}
+
+// broadcastChatTurn 向 Web/UI 广播一轮 assistant 中间结果（如 tool_use 前的说明与工具调用）。
+// 前端会将其写入历史并保留 run 状态，等待后续工具执行与最终回复。
+func broadcastChatTurn(ctx *Context, runId string, sessionKey string, message map[string]interface{}) {
+	if ctx == nil || ctx.Broadcast == nil {
+		return
+	}
+	seq := int64(0)
+	if ctx.AgentRunSeq != nil {
+		seq = nextChatSeq(ctx.AgentRunSeq, runId)
+	}
+	payload := map[string]interface{}{
+		"runId":      runId,
+		"sessionKey": sessionKey,
+		"seq":        seq,
+		"state":      "turn",
+		"message":    message,
+	}
+	ctx.Broadcast("chat", payload, nil)
+	if ctx.NodeSendToSession != nil {
+		ctx.NodeSendToSession(sessionKey, "chat", payload)
+	}
+}
+
+// broadcastChatComplete 通知 Web/UI 一次 run 已结束，触发历史刷新并清除流式状态。
+func broadcastChatComplete(ctx *Context, runId string, sessionKey string) {
+	if ctx == nil || ctx.Broadcast == nil {
+		return
+	}
+	seq := int64(0)
+	if ctx.AgentRunSeq != nil {
+		seq = nextChatSeq(ctx.AgentRunSeq, runId)
+	}
+	payload := map[string]interface{}{
+		"runId":      runId,
+		"sessionKey": sessionKey,
+		"seq":        seq,
+		"state":      "complete",
 	}
 	ctx.Broadcast("chat", payload, nil)
 	if ctx.NodeSendToSession != nil {
@@ -261,6 +686,220 @@ func isAssistantToolBlock(block map[string]interface{}) bool {
 	}
 }
 
+func isAssistantPlaceholderText(text string) bool {
+	return strings.TrimSpace(text) == "."
+}
+
+func assistantContentHasToolCalls(blocks []map[string]interface{}) bool {
+	for _, b := range blocks {
+		if isAssistantToolBlock(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldSkipAssistantTextBlock(text string, blocks []map[string]interface{}) bool {
+	return isAssistantPlaceholderText(text) && assistantContentHasToolCalls(blocks)
+}
+
+func assistantContentHasA2UI(blocks []map[string]interface{}) bool {
+	for _, b := range blocks {
+		if typ, _ := b["type"].(string); strings.EqualFold(strings.TrimSpace(typ), "a2ui") {
+			return true
+		}
+	}
+	return false
+}
+
+func isA2UIProtocolTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "a2ui_push", "a2ui_reset":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSuppressAssistantTextForA2UI(text string, blocks []map[string]interface{}, turnHasA2UI bool) bool {
+	if shouldSkipAssistantTextBlock(text, blocks) {
+		return true
+	}
+	return turnHasA2UI || assistantContentHasA2UI(blocks)
+}
+
+func stripAssistantTextBlocks(blocks []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(blocks))
+	for _, b := range blocks {
+		typ, _ := b["type"].(string)
+		if strings.EqualFold(strings.TrimSpace(typ), "text") {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+func combinedAssistantText(blocks []map[string]interface{}) string {
+	var parts []string
+	for _, b := range blocks {
+		typ, _ := b["type"].(string)
+		if !strings.EqualFold(strings.TrimSpace(typ), "text") {
+			continue
+		}
+		if t, ok := b["text"].(string); ok && strings.TrimSpace(t) != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func appendA2UIContentBlocks(blocks []map[string]interface{}, msgs []*a2ui.ServerMessage) []map[string]interface{} {
+	for _, msg := range a2ui.RepairMessages(msgs) {
+		raw, err := msg.RawJSON()
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		var parsed map[string]interface{}
+		if json.Unmarshal(raw, &parsed) == nil {
+			blocks = append(blocks, map[string]interface{}{
+				"type": "a2ui",
+				"a2ui": parsed,
+			})
+		}
+	}
+	return blocks
+}
+
+// normalizeAssistantContentForA2UI keeps a single user-visible channel: A2UI.
+// When A2UI blocks exist, strip duplicate markdown text. When only text exists on a final turn, convert to A2UI.
+func normalizeAssistantContentForA2UI(
+	blocks []map[string]interface{},
+	finalTurn bool,
+	emitA2UI func(json.RawMessage),
+) []map[string]interface{} {
+	if len(blocks) == 0 {
+		return blocks
+	}
+	if assistantContentHasA2UI(blocks) {
+		return stripAssistantTextBlocks(blocks)
+	}
+	if !finalTurn {
+		return blocks
+	}
+	text := combinedAssistantText(blocks)
+	if text == "" {
+		return blocks
+	}
+	msgs := a2ui.MessagesFromPlainText(text)
+	for _, msg := range a2ui.RepairMessages(msgs) {
+		raw, err := msg.RawJSON()
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		if emitA2UI != nil {
+			emitA2UI(raw)
+		}
+	}
+	withoutText := stripAssistantTextBlocks(blocks)
+	return appendA2UIContentBlocks(withoutText, msgs)
+}
+
+type assistantSnapshotParams struct {
+	ctx               *Context
+	runId             string
+	sessionKey        string
+	transcriptPath    string
+	projectRoot       string
+	content           []map[string]interface{}
+	stopReason        string
+	modelRef          string
+	runStart          time.Time
+	firstTokenTime    time.Time
+	totalToolDuration int64
+	usage             *api.Usage
+	parentMessageID   string
+}
+
+type assistantSnapshotResult struct {
+	lastMessageID string
+	messageBody   map[string]interface{}
+	imPlain       string
+}
+
+// publishAssistantSnapshot writes assistant content to transcript and broadcasts turn/final.
+func publishAssistantSnapshot(p assistantSnapshotParams) (assistantSnapshotResult, bool) {
+	if len(p.content) == 0 {
+		return assistantSnapshotResult{}, false
+	}
+	contentSnapshot := make([]map[string]interface{}, len(p.content))
+	copy(contentSnapshot, p.content)
+
+	msgID := uuid.New().String()[:8]
+	ts := time.Now().UTC().Format(time.RFC3339)
+	tsMs := time.Now().UnixMilli()
+	durationMs := time.Since(p.runStart).Milliseconds()
+	var currentFirstTokenMs int64
+	if !p.firstTokenTime.IsZero() {
+		currentFirstTokenMs = p.firstTokenTime.Sub(p.runStart).Milliseconds()
+	}
+	currentOutputMs := durationMs - p.totalToolDuration - currentFirstTokenMs
+	if currentOutputMs < 0 {
+		currentOutputMs = 0
+	}
+
+	msgBody := map[string]interface{}{
+		"role":             "assistant",
+		"content":          contentSnapshot,
+		"timestamp":        tsMs,
+		"durationMs":       durationMs,
+		"firstTokenMs":     currentFirstTokenMs,
+		"toolDurationMs":   p.totalToolDuration,
+		"outputDurationMs": currentOutputMs,
+	}
+	if p.usage != nil {
+		total := p.usage.InputTokens + p.usage.OutputTokens
+		msgBody["usage"] = map[string]interface{}{
+			"input":       p.usage.InputTokens,
+			"output":      p.usage.OutputTokens,
+			"totalTokens": total,
+		}
+	}
+	if p.stopReason != "" {
+		msgBody["stopReason"] = p.stopReason
+	}
+	if p.modelRef != "" {
+		msgBody["model"] = p.modelRef
+	}
+
+	line := map[string]interface{}{
+		"type":      "message",
+		"id":        msgID,
+		"parentId":  p.parentMessageID,
+		"timestamp": ts,
+		"message": map[string]interface{}{
+			"role":      "assistant",
+			"content":   contentSnapshot,
+			"timestamp": tsMs,
+		},
+	}
+	if err := session.AppendTranscriptLine(p.transcriptPath, line); err != nil {
+		chatLog.Warn("append assistant message to transcript failed path=%s err=%v", p.transcriptPath, err)
+	}
+
+	if p.stopReason == "tool_use" {
+		broadcastChatTurn(p.ctx, p.runId, p.sessionKey, msgBody)
+	} else {
+		broadcastChatFinal(p.ctx, p.runId, p.sessionKey, msgBody)
+	}
+
+	return assistantSnapshotResult{
+		lastMessageID: msgID,
+		messageBody:   msgBody,
+		imPlain:       extractAssistantTextForIMDelivery(msgBody),
+	}, true
+}
+
 // extractAssistantTextForIMDelivery 提取「对用户的最终可见回复」：只拼接「最后一个工具块之后」的文本，
 // 用于 IM 投递与 cron 摘要，避免把工具调用前的说明等写入飞书/企微或 cron 结果文件。
 func extractAssistantTextForIMDelivery(message map[string]interface{}) string {
@@ -281,7 +920,7 @@ func extractAssistantTextForIMDelivery(message map[string]interface{}) string {
 			continue
 		}
 		t, ok := b["text"].(string)
-		if !ok || strings.TrimSpace(t) == "" {
+		if !ok || strings.TrimSpace(t) == "" || isAssistantPlaceholderText(t) {
 			continue
 		}
 		typ, _ := b["type"].(string)
@@ -680,7 +1319,8 @@ func appendErrorToTranscript(transcriptPath string, errorMsg string, runId strin
 	formattedMsg := fmt.Sprintf("[错误] %s", errorMsg)
 
 	// Try to append the error message
-	if err := session.AppendAssistantMessage(transcriptPath, formattedMsg); err != nil {
+	err := session.AppendAssistantMessage(transcriptPath, formattedMsg)
+	if err != nil {
 		chatLog.Error("failed to append error to transcript transcriptPath=%s runId=%s sessionKey=%s error=%v originalError=%s", transcriptPath, runId, sessionKey, err, errorMsg)
 	} else {
 		chatLog.Info("error appended to transcript runId=%s sessionKey=%s error=%s", runId, sessionKey, errorMsg)
@@ -688,6 +1328,45 @@ func appendErrorToTranscript(transcriptPath string, errorMsg string, runId strin
 
 	// Broadcast error event to websocket clients for immediate notification
 	broadcastChatError(ctx, runId, sessionKey, errorMsg)
+}
+
+// ChatAttachmentReadHandler handles "chat.attachment.read" — loads a sandbox HTML attachment for preview/download.
+func ChatAttachmentReadHandler(opts HandlerOpts) error {
+	sessionKey, _ := opts.Params["sessionKey"].(string)
+	sessionKey = strings.TrimSpace(strings.ToLower(sessionKey))
+	rawPath, _ := opts.Params["path"].(string)
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.attachment.read: path is required",
+		}, nil)
+		return nil
+	}
+	if _, _, _, err := ResolveChatSessionID(opts.Params, opts.Context); err != nil {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.attachment.read: invalid session: " + err.Error(),
+		}, nil)
+		return nil
+	}
+	env := func(k string) string { return os.Getenv(k) }
+	cfg := loadConfigFromContext(opts.Context)
+	agentID := agent.ResolveSessionAgentID(sessionKey)
+	projectRoot := agent.ResolveAgentWorkspaceDir(cfg, agentID, env)
+	if projectRoot == "" {
+		projectRoot = "."
+	}
+	block, err := tools.AttachmentBlockFromLocalPath(projectRoot, rawPath)
+	if err != nil {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.attachment.read: " + err.Error(),
+		}, nil)
+		return nil
+	}
+	opts.Respond(true, block, nil, nil)
+	return nil
 }
 
 // ChatHistoryHandler handles "chat.history" - reads messages from transcript.
@@ -754,7 +1433,7 @@ func ChatHistoryHandler(opts HandlerOpts) error {
 		}, nil, nil)
 		return nil
 	}
-		// Take last N messages (match TS behavior)
+	// Take last N messages (match TS behavior)
 	start := 0
 	if len(msgs) > limit {
 		start = len(msgs) - limit
@@ -762,43 +1441,7 @@ func ChatHistoryHandler(opts HandlerOpts) error {
 	sliced := msgs[start:]
 	messages := make([]interface{}, 0, len(sliced))
 	for _, m := range sliced {
-		// Convert to client format: { role, content: [{ type, text }], timestamp }
-		content := make([]interface{}, 0, len(m.Content))
-		for _, b := range m.Content {
-			if b.Type == "image" {
-				content = append(content, map[string]interface{}{
-					"type": "image",
-					"source": map[string]interface{}{
-						"type":       "base64",
-						"media_type": b.MimeType,
-						"data":       b.Data,
-					},
-				})
-			} else {
-				content = append(content, map[string]interface{}{
-					"type": b.Type,
-					"text": b.Text,
-				})
-			}
-		}
-		msgMap := map[string]interface{}{
-			"role":      m.Role,
-			"content":   content,
-			"timestamp": m.Timestamp,
-		}
-		if m.DurationMs != nil {
-			msgMap["durationMs"] = *m.DurationMs
-		}
-		if m.FirstTokenMs != nil {
-			msgMap["firstTokenMs"] = *m.FirstTokenMs
-		}
-		if m.ToolDurationMs != nil {
-			msgMap["toolDurationMs"] = *m.ToolDurationMs
-		}
-		if m.OutputDurationMs != nil {
-			msgMap["outputDurationMs"] = *m.OutputDurationMs
-		}
-		messages = append(messages, msgMap)
+		messages = append(messages, transcriptMessageToClientFormat(m))
 	}
 	// Load thinkingLevel and verboseLevel from session store when available
 	thinkingLevel := "medium"
@@ -890,6 +1533,7 @@ func runSessionResetForChat(sessionKey string, ctx *Context) (sessionID, session
 		}
 		runtime.ClearSessionHistory(projectRoot, oldSessionID)
 	}
+	runtime.EvictSessionRuntime(sessionKey)
 
 	transcriptPath = session.ResolveSessionFilePath(next.SessionID, nil, env)
 	if ensureErr := session.EnsureTranscriptFile(transcriptPath, next.SessionID); ensureErr != nil {
@@ -973,9 +1617,16 @@ func ChatSendHandler(opts HandlerOpts) error {
 		updateSessionAfterRun(opts.Context, sessionKey, sessionID, sessionFile, nil)
 	}
 
-	// Support attachments (simplified - just check if present)
+	// Support attachments (single file, common formats only)
 	attachmentsRaw, _ := opts.Params["attachments"].([]interface{})
 	hasAttachments := len(attachmentsRaw) > 0
+	if hasAttachments && len(attachmentsRaw) > 1 {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.send: only one attachment allowed",
+		}, nil)
+		return nil
+	}
 	if hasAttachments {
 		env := func(k string) string { return os.Getenv(k) }
 		cfg := loadConfigFromContext(opts.Context)
@@ -998,63 +1649,46 @@ func ChatSendHandler(opts HandlerOpts) error {
 			if fn == "" {
 				fn = "attachment"
 			}
+			mimeType, _ := obj["mimeType"].(string)
+			if filepath.Ext(fn) == "" {
+				if ext := inferAttachmentSaveExtension(fn, mimeType); ext != "" {
+					fn = fn + ext
+				}
+			}
 
 			// Process and save the attachment to workspace
 			// Support both dataUrl (legacy) and content (new format with raw base64)
-			var base64Data string
 			dataUrl, _ := obj["dataUrl"].(string)
 			contentRaw, _ := obj["content"].(string)
-			mimeType, _ := obj["mimeType"].(string)
 
-			if dataUrl != "" {
-				parts := strings.SplitN(dataUrl, ",", 2)
-				if len(parts) == 2 {
-					base64Data = strings.TrimSpace(parts[1])
-				}
-			} else if contentRaw != "" {
-				base64Data = strings.TrimSpace(contentRaw)
+			dec, err := decodeChatAttachmentBase64(dataUrl, contentRaw)
+			if err != nil {
+				opts.Respond(false, nil, &protocol.ErrorShape{
+					Code:    protocol.ErrCodeInvalidRequest,
+					Message: "chat.send: invalid attachment: " + err.Error(),
+				}, nil)
+				return nil
+			}
+			if err := validateChatAttachmentMeta(fn, mimeType, len(dec)); err != nil {
+				opts.Respond(false, nil, &protocol.ErrorShape{
+					Code:    protocol.ErrCodeInvalidRequest,
+					Message: "chat.send: " + err.Error(),
+				}, nil)
+				return nil
 			}
 
-			if base64Data != "" {
-				base64Data = strings.ReplaceAll(base64Data, "\r", "")
-				base64Data = strings.ReplaceAll(base64Data, "\n", "")
-
-				dec, err := base64.StdEncoding.DecodeString(base64Data)
-				if err != nil {
-					dec, err = base64.RawStdEncoding.DecodeString(base64Data)
-				}
-				if err == nil {
-					// Auto-add extension from mimeType if filename lacks one
-					saveName := fn
-					if filepath.Ext(saveName) == "" && mimeType != "" {
-						switch {
-						case strings.HasPrefix(mimeType, "image/png"):
-							saveName = fn + ".png"
-						case strings.HasPrefix(mimeType, "image/jpeg"):
-							saveName = fn + ".jpg"
-						case strings.HasPrefix(mimeType, "image/gif"):
-							saveName = fn + ".gif"
-						case strings.HasPrefix(mimeType, "image/webp"):
-							saveName = fn + ".webp"
-						case strings.HasPrefix(mimeType, "image/bmp"):
-							saveName = fn + ".bmp"
-						case strings.HasPrefix(mimeType, "image/svg+xml"):
-							saveName = fn + ".svg"
-						}
-					}
-					filePath := filepath.Join(attachmentsDir, saveName)
-					if writeErr := os.WriteFile(filePath, dec, 0644); writeErr == nil {
-						relPath := filepath.Join("attachments", saveName)
-						names = append(names, fmt.Sprintf("%s (已保存到 %s)", saveName, filepath.ToSlash(relPath)))
-						continue
-					} else {
-						chatLog.Warn("ChatSendHandler: failed to write attachment file path=%s error=%v", filePath, writeErr)
-					}
-				} else {
-					chatLog.Warn("ChatSendHandler: failed to decode base64 attachment filename=%s error=%v", fn, err)
-				}
+			saveName := fn
+			if ext := inferAttachmentSaveExtension(saveName, mimeType); filepath.Ext(saveName) == "" && ext != "" {
+				saveName = fn + ext
 			}
-			names = append(names, fn)
+			filePath := filepath.Join(attachmentsDir, saveName)
+			if writeErr := os.WriteFile(filePath, dec, 0644); writeErr != nil {
+				chatLog.Warn("ChatSendHandler: failed to write attachment file path=%s error=%v", filePath, writeErr)
+				names = append(names, fn)
+				continue
+			}
+			relPath := filepath.Join("attachments", saveName)
+			names = append(names, fmt.Sprintf("%s (已保存到 %s)", saveName, filepath.ToSlash(relPath)))
 		}
 		if message == "" {
 			if len(names) > 0 {
@@ -1244,8 +1878,11 @@ func ChatSendHandler(opts HandlerOpts) error {
 			ctxForBroadcast := opts.Context // Capture context for broadcast
 			deliverForGoroutine := deliverCtx
 			defer func() {
+				cfg := loadConfigFromContext(ctxForBroadcast)
+				browser.StopForRun(context.Background(), cfg, os.Getenv, runId)
 				chatAbortControllers.Delete(runId)
 				cancel()
+				broadcastChatComplete(ctxForBroadcast, runId, sessionKey)
 			}()
 
 			// Recover from panics and handle them as errors
@@ -1260,6 +1897,16 @@ func ChatSendHandler(opts HandlerOpts) error {
 					appendErrorToTranscript(transcriptPath, errMsg, runId, sessionKey, ctxForBroadcast)
 				}
 			}()
+
+			modelRefForRun := ""
+			if mref, ok := opts.Params["modelRef"].(string); ok {
+				modelRefForRun = strings.TrimSpace(mref)
+			}
+			if modelRefForRun == "" {
+				if cfg := loadConfigFromContext(ctxForBroadcast); cfg != nil {
+					modelRefForRun = agent.ResolveAgentModelRef(cfg, agent.ResolveSessionAgentID(sessionKey))
+				}
+			}
 
 			// Build prompt with thinking injection if provided.
 			// NOTE: Do NOT use "/think" prefix - agentsdk-go parses lines starting with "/"
@@ -1328,10 +1975,6 @@ func ChatSendHandler(opts HandlerOpts) error {
 				modelFactory = runtime.DefaultModelFactory()
 			}
 
-			var invoker tools.GatewayInvoker
-			if ctxForBroadcast != nil && ctxForBroadcast.InvokeMethod != nil {
-				invoker = &gatewayInvokerAdapter{invoke: ctxForBroadcast.InvokeMethod}
-			}
 			// Resolve workspace root and config first so we can decide MCP source (config vs context).
 			// 使用 loadConfigFromContext 确保在 ctx.Config 为空时也能从 LoadConfigSnapshot 获取最新配置（含 MCP）。
 			projectRoot := ""
@@ -1344,123 +1987,162 @@ func ChatSendHandler(opts HandlerOpts) error {
 			if projectRoot == "" {
 				projectRoot = "."
 			}
+			runResources := parseChatRunResources(opts.Params)
 			mcpServers := buildMCPForSession(sessionKey, runtimeConfig)
-			agentTools := tools.DefaultToolsWithInvoker(invoker)
-
-			// Merge tools by name, prefer later source on conflicts.
-			toolOrder := make([]string, 0, len(agentTools))
-			toolByName := make(map[string]sdkTool.Tool, len(agentTools))
-			addTool := func(t sdkTool.Tool) {
-				if t == nil {
-					return
-				}
-				name := strings.TrimSpace(t.Name())
-				if name == "" {
-					return
-				}
-				if _, ok := toolByName[name]; !ok {
-					toolOrder = append(toolOrder, name)
-				}
-				toolByName[name] = t
+			if runResources.Configured {
+				mcpServers = filterMCPServersByKeys(mcpServers, runResources.McpServers)
 			}
-			for _, t := range agentTools {
-				addTool(t)
-			}
-			// Add MCP tools from gateway context (env injection + long-lived connections).
-			if ctxForBroadcast != nil && ctxForBroadcast.MCPTools != nil {
-				mcpTools, mcpErr := ctxForBroadcast.MCPTools(ctx)
-				if mcpErr != nil {
-					chatLog.Warn("mcp tools load failed, continuing without MCP sessionKey=%s error=%v", sessionKey, mcpErr)
-				} else if len(mcpTools) > 0 {
-					for _, t := range mcpTools {
-						// Lower precedence than tools generated from mcpServers below.
-						addTool(t)
-					}
+			serversMerged := buildMergedMCPServers(runtimeConfig, mcpServers)
+			employeeID := parseEmployeeIDFromSessionKey(sessionKey)
+			systemPromptOverrides := ""
+			if employeeID != "" {
+				env := func(k string) string { return os.Getenv(k) }
+				if m, err := employees.LoadManifest(employeeID, env); err == nil && m != nil && strings.TrimSpace(m.Prompt) != "" {
+					systemPromptOverrides = strings.TrimSpace(m.Prompt)
 				}
 			}
-
-			// Add MCP tools from merged server specs (global config + employee manifest).
-			// On duplicates, tools built from mcpServers take precedence over context-injected MCP tools.
-			if len(mcpServers) > 0 {
-				// IMPORTANT: Do not mutate runtimeConfig.Mcp.Servers here; that is the loaded config snapshot.
-				// Build a merged server map for MCP manager only.
-				serversMerged := make(map[string]config.McpServerEntry)
-				if runtimeConfig != nil && runtimeConfig.Mcp != nil && len(runtimeConfig.Mcp.Servers) > 0 {
-					for k, v := range runtimeConfig.Mcp.Servers {
-						if !v.Enabled {
-							continue
+			skillKeysForFP := append([]string(nil), runResources.SkillKeys...)
+			xunfeiImageMode := false
+			if isXunfeiProvider {
+				for _, raw := range attachmentsRaw {
+					if obj, ok := raw.(map[string]interface{}); ok {
+						if mime, _ := obj["mimeType"].(string); strings.HasPrefix(strings.ToLower(mime), "image/") {
+							xunfeiImageMode = true
+							break
 						}
-						serversMerged[k] = v
 					}
 				}
-				// Session/employee derived servers override duplicates.
-				for k, v := range mcpServers {
-					if !v.Enabled {
-						continue
-					}
-					serversMerged[k] = v
-				}
+			}
+			runtimeFP := chatRuntimeFingerprint(
+				projectRoot,
+				agentID,
+				employeeID,
+				modelRefForRun,
+				xunfeiImageMode,
+				mcpServerKeyNames(serversMerged),
+				skillKeysForFP,
+				runResources.WebSearch,
+				systemPromptOverrides,
+			)
 
-				mgr, err := mcpManager.NewManager(context.Background(), serversMerged)
-				if err == nil && mgr != nil {
-					defer mgr.Close()
-					mcpTools, mcpToolsErr := mgr.Tools(ctx)
-					if mcpToolsErr == nil {
+			rt, releasePooledRT, err := runtime.DefaultPool().Acquire(sessionKey, runtimeFP, func() (*runtime.Runtime, func(), error) {
+				var invoker tools.GatewayInvoker
+				if ctxForBroadcast != nil && ctxForBroadcast.InvokeMethod != nil {
+					invoker = &gatewayInvokerAdapter{invoke: ctxForBroadcast.InvokeMethod}
+				}
+				agentTools := tools.DefaultToolsWithInvoker(invoker)
+
+				toolOrder := make([]string, 0, len(agentTools))
+				toolByName := make(map[string]sdkTool.Tool, len(agentTools))
+				addTool := func(t sdkTool.Tool) {
+					if t == nil {
+						return
+					}
+					name := strings.TrimSpace(t.Name())
+					if name == "" {
+						return
+					}
+					if _, ok := toolByName[name]; !ok {
+						toolOrder = append(toolOrder, name)
+					}
+					toolByName[name] = t
+				}
+				for _, t := range agentTools {
+					addTool(t)
+				}
+				loadMcpFromContext := !runResources.Configured || len(runResources.McpServers) > 0
+				if loadMcpFromContext && ctxForBroadcast != nil && ctxForBroadcast.MCPTools != nil {
+					mcpTools, mcpErr := ctxForBroadcast.MCPTools(ctx)
+					if mcpErr != nil {
+						chatLog.Warn("mcp tools load failed, continuing without MCP sessionKey=%s error=%v", sessionKey, mcpErr)
+					} else if len(mcpTools) > 0 {
 						for _, t := range mcpTools {
 							addTool(t)
 						}
 					}
 				}
-			}
 
-			if IsAgentToAgentEnabled(runtimeConfig) {
-				for _, t := range SwarmTools(true) {
-					addTool(t)
+				var pooledMCPMgr *mcpManager.Manager
+				if serversMerged != nil {
+					mgr, mgrErr := mcpManager.NewManager(context.Background(), serversMerged)
+					if mgrErr == nil && mgr != nil {
+						pooledMCPMgr = mgr
+						mcpTools, mcpToolsErr := mgr.Tools(ctx)
+						if mcpToolsErr == nil {
+							for _, t := range mcpTools {
+								addTool(t)
+							}
+						}
+					}
 				}
-			}
 
-			agentTools = make([]sdkTool.Tool, 0, len(toolOrder))
-			for _, name := range toolOrder {
-				if t, ok := toolByName[name]; ok && t != nil {
-					agentTools = append(agentTools, t)
+				if IsAgentToAgentEnabled(runtimeConfig) {
+					for _, t := range SwarmTools(true) {
+						addTool(t)
+					}
 				}
-			}
 
-			// 数字员工会话：若 manifest 有 Prompt，作为 SystemPromptOverrides 传入，/new 后仍保留人设
-			systemPromptOverrides := ""
-			if empID := parseEmployeeIDFromSessionKey(sessionKey); empID != "" {
-				env := func(k string) string { return os.Getenv(k) }
-				if m, err := employees.LoadManifest(empID, env); err == nil && m != nil && strings.TrimSpace(m.Prompt) != "" {
-					systemPromptOverrides = strings.TrimSpace(m.Prompt)
+				agentTools = make([]sdkTool.Tool, 0, len(toolOrder))
+				for _, name := range toolOrder {
+					if t, ok := toolByName[name]; ok && t != nil {
+						agentTools = append(agentTools, t)
+					}
 				}
-			}
-			sessionAgentID := agent.ResolveSessionAgentID(sessionKey)
-			modelRefForBudget, _ := opts.Params["modelRef"].(string)
-			tokenLimit := agent.TokenLimitForSessionHistory(runtimeConfig, sessionAgentID, strings.TrimSpace(modelRefForBudget))
-			rtOpts := runtime.Options{
-				Tools:                 agentTools,
-				ModelFactory:          modelFactory,
-				ProjectRoot:           projectRoot,
-				Config:                runtimeConfig,
-				EnableSkills:          true,
-				EmployeeID:            parseEmployeeIDFromSessionKey(sessionKey),
-				EnableSubagents:       true,
-				EnableSandbox:         true,
-				EnableApprovalQueue:   true,
-				EnableSystemPrompt:    true,
-				SystemPromptOverrides: systemPromptOverrides,
-				TokenTracking:         true,
-				AgentID:               sessionAgentID, // 与 sessions jsonl 目录 ~/.openocta/agents/<agentId>/sessions 一致
-				Env:                   os.Getenv,
-				TokenLimit:            tokenLimit,
-			}
-			rt, err := runtime.New(ctx, rtOpts)
+
+				sessionAgentID := agent.ResolveSessionAgentID(sessionKey)
+				modelRefForBudget, _ := opts.Params["modelRef"].(string)
+				tokenLimit := agent.TokenLimitForSessionHistory(runtimeConfig, sessionAgentID, strings.TrimSpace(modelRefForBudget))
+				var skillFilter *[]string
+				if runResources.Configured {
+					filter := append([]string(nil), runResources.SkillKeys...)
+					skillFilter = &filter
+				}
+				var mcpFilter *[]string
+				if runResources.Configured {
+					filter := append([]string(nil), runResources.McpServers...)
+					mcpFilter = &filter
+				}
+				webToolsEnabled := runResources.WebSearch
+				rtOpts := runtime.Options{
+					Tools:                 agentTools,
+					ModelFactory:          modelFactory,
+					ProjectRoot:           projectRoot,
+					Config:                runtimeConfig,
+					EnableSkills:          true,
+					SkillFilter:           skillFilter,
+					McpServerFilter:       mcpFilter,
+					EnableWebTools:        &webToolsEnabled,
+					EmployeeID:            employeeID,
+					EnableSubagents:       true,
+					EnableSandbox:         true,
+					EnableApprovalQueue:   true,
+					EnableSystemPrompt:    true,
+					SystemPromptOverrides: systemPromptOverrides,
+					TokenTracking:         true,
+					AgentID:               sessionAgentID,
+					Env:                   os.Getenv,
+					TokenLimit:            tokenLimit,
+				}
+				pooledRT, newErr := runtime.New(ctx, rtOpts)
+				if newErr != nil {
+					if pooledMCPMgr != nil {
+						pooledMCPMgr.Close()
+					}
+					return nil, nil, newErr
+				}
+				onEvict := func() {
+					if pooledMCPMgr != nil {
+						pooledMCPMgr.Close()
+					}
+				}
+				return pooledRT, onEvict, nil
+			})
 			if err != nil {
 				errMsg := fmt.Sprintf("无法创建运行时: %s", err.Error())
 				appendErrorToTranscript(transcriptPath, errMsg, runId, sessionKey, ctxForBroadcast)
 				return
 			}
-			defer rt.Close()
+			defer releasePooledRT()
 
 			// Execute agent run with streaming
 			runStart := time.Now()
@@ -1493,18 +2175,18 @@ func ChatSendHandler(opts HandlerOpts) error {
 					base64Data = parts[1]
 				}
 
-			var blockType model.ContentBlockType = model.ContentBlockDocument
-			if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-				blockType = model.ContentBlockImage
-			}
+				var blockType model.ContentBlockType = model.ContentBlockDocument
+				if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+					blockType = model.ContentBlockImage
+				}
 
-			// Xunfei's OpenAI-compatible chat endpoint (like Spark 4.0 Ultra) supports image/image_url
-			// in messages. We do not skip image blocks.
-			contentBlocks = append(contentBlocks, model.ContentBlock{
-				Type:      blockType,
-				MediaType: mimeType,
-				Data:      base64Data,
-			})
+				// Xunfei's OpenAI-compatible chat endpoint (like Spark 4.0 Ultra) supports image/image_url
+				// in messages. We do not skip image blocks.
+				contentBlocks = append(contentBlocks, model.ContentBlock{
+					Type:      blockType,
+					MediaType: mimeType,
+					Data:      base64Data,
+				})
 			}
 
 			req := api.Request{
@@ -1575,6 +2257,22 @@ func ChatSendHandler(opts HandlerOpts) error {
 						messageBody["durationMs"] = *opts.DurationMs
 						messageBody["outputDurationMs"] = *opts.DurationMs
 					}
+					if opts != nil && opts.Usage != nil {
+						total := opts.Usage.TotalTokens
+						if total == 0 {
+							total = opts.Usage.Input + opts.Usage.Output + opts.Usage.CacheRead + opts.Usage.CacheWrite
+						}
+						messageBody["usage"] = map[string]interface{}{
+							"input":       opts.Usage.Input,
+							"output":      opts.Usage.Output,
+							"cacheRead":   opts.Usage.CacheRead,
+							"cacheWrite":  opts.Usage.CacheWrite,
+							"totalTokens": total,
+						}
+					}
+					if modelRefForRun != "" {
+						messageBody["model"] = modelRefForRun
+					}
 					broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
 					cronSummary := extractAssistantTextForIMDelivery(messageBody)
 					if cronSummary == "" {
@@ -1608,10 +2306,12 @@ func ChatSendHandler(opts HandlerOpts) error {
 			var firstTokenTime time.Time
 			var totalToolDurationMs int64
 			toolStartTimes := make(map[string]time.Time)
+			turnHasA2UI := false
 
+		streamLoop:
 			for evt := range eventChan {
 				if ctx.Err() != nil {
-					break
+					break streamLoop
 				}
 				switch evt.Type {
 				case api.EventContentBlockDelta:
@@ -1621,14 +2321,32 @@ func ChatSendHandler(opts HandlerOpts) error {
 					if evt.Delta != nil && evt.Delta.Text != "" {
 						delta := evt.Delta.Text
 						textBuf.WriteString(delta)
-						broadcastAgentEvent(ctxForBroadcast, runId, sessionKey, "assistant", map[string]interface{}{
-							"text":  delta,
-							"delta": delta,
-						})
-						broadcastChatDelta(ctxForBroadcast, runId, sessionKey, textBuf.String())
+						visible := textBuf.String()
+						if !shouldSuppressAssistantTextForA2UI(visible, assistantContent, turnHasA2UI) {
+							broadcastAgentEvent(ctxForBroadcast, runId, sessionKey, "assistant", map[string]interface{}{
+								"text":  delta,
+								"delta": delta,
+							})
+							broadcastChatDelta(ctxForBroadcast, runId, sessionKey, visible)
+						}
 					}
 					if evt.Delta != nil && evt.Delta.StopReason != "" {
 						stopReason = evt.Delta.StopReason
+					}
+				case api.EventA2UI:
+					if len(evt.A2UI) > 0 {
+						turnHasA2UI = true
+						broadcastChatA2UI(ctxForBroadcast, runId, sessionKey, evt.A2UI)
+						var parsed map[string]interface{}
+						if json.Unmarshal(evt.A2UI, &parsed) == nil {
+							assistantContent = append(assistantContent, map[string]interface{}{
+								"type": "a2ui",
+								"a2ui": parsed,
+							})
+						}
+						broadcastAgentEvent(ctxForBroadcast, runId, sessionKey, "a2ui", map[string]interface{}{
+							"a2ui": json.RawMessage(evt.A2UI),
+						})
 					}
 				case api.EventContentBlockStart:
 					if firstTokenTime.IsZero() {
@@ -1636,7 +2354,6 @@ func ChatSendHandler(opts HandlerOpts) error {
 					}
 					if evt.ContentBlock != nil {
 						if evt.ContentBlock.Type == "tool_use" {
-							toolStartTimes[evt.ContentBlock.ID] = time.Now()
 							tc := map[string]interface{}{
 								"type":      "toolCall",
 								"id":        evt.ContentBlock.ID,
@@ -1646,7 +2363,9 @@ func ChatSendHandler(opts HandlerOpts) error {
 							if len(evt.ContentBlock.Input) > 0 {
 								var args map[string]interface{}
 								if json.Unmarshal(evt.ContentBlock.Input, &args) == nil {
-									tc["arguments"] = nil
+									tc["arguments"] = args
+								} else {
+									tc["arguments"] = json.RawMessage(evt.ContentBlock.Input)
 								}
 							}
 							assistantContent = append(assistantContent, tc)
@@ -1655,35 +2374,56 @@ func ChatSendHandler(opts HandlerOpts) error {
 								"name":       evt.ContentBlock.Name,
 								"arguments":  evt.ContentBlock.Input,
 							})
-						} else if evt.ContentBlock.Type == "text" && evt.ContentBlock.Text != "" {
+						} else if evt.ContentBlock.Type == "text" && evt.ContentBlock.Text != "" && !shouldSuppressAssistantTextForA2UI(evt.ContentBlock.Text, assistantContent, turnHasA2UI) {
 							assistantContent = append(assistantContent, map[string]interface{}{"type": "text", "text": evt.ContentBlock.Text})
 						}
 					}
+				case api.EventToolExecutionStart:
+					if evt.ToolUseID != "" {
+						toolStartTimes[evt.ToolUseID] = time.Now()
+					}
+					if tools.IsBrowserToolName(evt.Name) {
+						browser.MarkRunUsingBrowser(runId)
+					}
 				case api.EventToolExecutionResult:
+					if ctx.Err() != nil {
+						break streamLoop
+					}
 					if startTime, ok := toolStartTimes[evt.ToolUseID]; ok {
 						totalToolDurationMs += time.Since(startTime).Milliseconds()
 					}
 					isErr := evt.IsError != nil && *evt.IsError
-					outputStr := ""
-					if evt.Output != nil {
-						if s, ok := evt.Output.(string); ok {
-							outputStr = s
-						} else {
-							b, _ := json.Marshal(evt.Output)
-							outputStr = string(b)
-						}
-					}
+					outputStr := formatStreamToolResultOutput(evt.Output)
 					broadcastAgentEvent(ctxForBroadcast, runId, sessionKey, "tool_result", map[string]interface{}{
 						"toolCallId": evt.ToolUseID,
 						"toolName":   evt.Name,
 						"content":    outputStr,
 						"isError":    isErr,
 					})
+					if !isErr {
+						for _, block := range tools.ParseOpenOctaAttachments(outputStr) {
+							assistantContent = append(assistantContent, block)
+						}
+						for _, block := range tools.AttachmentBlocksFromDeliverableToolOutput(evt.Name, outputStr, projectRoot) {
+							assistantContent = append(assistantContent, block)
+						}
+					}
 					parentID := lastMessageID
 					msgID := uuid.New().String()[:8]
 					lastMessageID = msgID
 					ts := time.Now().UTC().Format(time.RFC3339)
 					tsMs := time.Now().UnixMilli()
+					toolResultContent := []map[string]interface{}{
+						{"type": "text", "text": tools.StripOpenOctaAttachmentsMarker(outputStr)},
+					}
+					if !isErr {
+						for _, block := range tools.ParseOpenOctaAttachments(outputStr) {
+							toolResultContent = append(toolResultContent, block)
+						}
+						for _, block := range tools.AttachmentBlocksFromDeliverableToolOutput(evt.Name, outputStr, projectRoot) {
+							toolResultContent = append(toolResultContent, block)
+						}
+					}
 					line := map[string]interface{}{
 						"type":      "message",
 						"id":        msgID,
@@ -1693,7 +2433,7 @@ func ChatSendHandler(opts HandlerOpts) error {
 							"role":       "toolResult",
 							"toolCallId": evt.ToolUseID,
 							"toolName":   evt.Name,
-							"content":    []map[string]interface{}{{"type": "text", "text": outputStr}},
+							"content":    toolResultContent,
 							"isError":    isErr,
 							"timestamp":  tsMs,
 						},
@@ -1706,6 +2446,9 @@ func ChatSendHandler(opts HandlerOpts) error {
 						usageSnapshot = evt.Usage
 					}
 				case api.EventMessageStop:
+					if ctx.Err() != nil {
+						break streamLoop
+					}
 					if evt.Usage != nil {
 						usageSnapshot = evt.Usage
 					}
@@ -1714,8 +2457,23 @@ func ChatSendHandler(opts HandlerOpts) error {
 					}
 					// Flush assistant message: thinking + toolCalls + text (snapshot for this turn only)
 					if textBuf.Len() > 0 {
-						assistantContent = append(assistantContent, map[string]interface{}{"type": "text", "text": textBuf.String()})
+						text := textBuf.String()
+						if !shouldSuppressAssistantTextForA2UI(text, assistantContent, turnHasA2UI) {
+							assistantContent = append(assistantContent, map[string]interface{}{"type": "text", "text": text})
+						}
 					}
+					isFinalTurn := stopReason != "tool_use"
+					assistantContent = normalizeAssistantContentForA2UI(
+						assistantContent,
+						isFinalTurn,
+						func(raw json.RawMessage) {
+							broadcastChatA2UI(ctxForBroadcast, runId, sessionKey, raw)
+						},
+					)
+					if assistantContentHasA2UI(assistantContent) {
+						turnHasA2UI = true
+					}
+					assistantContent = tools.MergeDeliverableAttachmentBlocks(assistantContent, projectRoot)
 					if len(assistantContent) > 0 {
 						parentID := lastMessageID
 						msgID := uuid.New().String()[:8]
@@ -1741,6 +2499,9 @@ func ChatSendHandler(opts HandlerOpts) error {
 						if stopReason != "" {
 							msgBody["stopReason"] = stopReason
 						}
+						if modelRefForRun != "" {
+							msgBody["model"] = modelRefForRun
+						}
 						durationMs := time.Since(runStart).Milliseconds()
 						msgBody["durationMs"] = durationMs
 						var currentFirstTokenMs int64
@@ -1765,30 +2526,47 @@ func ChatSendHandler(opts HandlerOpts) error {
 						if err := session.AppendTranscriptLine(transcriptPath, line); err != nil {
 							chatLog.Warn("append assistant message to transcript failed path=%s err=%v", transcriptPath, err)
 						}
-					messageBody := map[string]interface{}{
-						"role":             "assistant",
-						"content":          contentSnapshot,
-						"timestamp":        tsMs,
-						"durationMs":       durationMs,
-						"firstTokenMs":     currentFirstTokenMs,
-						"toolDurationMs":   totalToolDurationMs,
-						"outputDurationMs": currentOutputMs,
-					}
-					// 只在真正结束时广播 final；工具调用轮次不广播，避免前端反复刷新
-					if stopReason != "tool_use" {
-						broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
-					}
-					if t := extractAssistantTextForIMDelivery(messageBody); t != "" {
+						messageBody := map[string]interface{}{
+							"role":             "assistant",
+							"content":          contentSnapshot,
+							"timestamp":        tsMs,
+							"durationMs":       durationMs,
+							"firstTokenMs":     currentFirstTokenMs,
+							"toolDurationMs":   totalToolDurationMs,
+							"outputDurationMs": currentOutputMs,
+						}
+						if usageSnapshot != nil {
+							total := usageSnapshot.InputTokens + usageSnapshot.OutputTokens
+							messageBody["usage"] = map[string]interface{}{
+								"input":       usageSnapshot.InputTokens,
+								"output":      usageSnapshot.OutputTokens,
+								"totalTokens": total,
+							}
+						}
+						if stopReason != "" {
+							messageBody["stopReason"] = stopReason
+						}
+						if modelRefForRun != "" {
+							messageBody["model"] = modelRefForRun
+						}
+						// tool_use 轮次广播 turn（保留 run 状态）；最终轮次广播 final。
+						if stopReason == "tool_use" {
+							broadcastChatTurn(ctxForBroadcast, runId, sessionKey, messageBody)
+						} else {
+							broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
+						}
+						if t := extractAssistantTextForIMDelivery(messageBody); t != "" {
 							streamIMPlain = t
 							lastAssistantContent = t
 						}
 						// Reset accumulators so next EventMessageStop (if any) does not include this turn's content
 						assistantContent = nil
 						textBuf.Reset()
-				} else if usageSnapshot != nil && stopReason != "tool_use" {
-					broadcastChatFinal(ctxForBroadcast, runId, sessionKey, map[string]interface{}{
-						"role": "assistant", "content": []map[string]interface{}{}, "timestamp": time.Now().UnixMilli(),
-					})
+						turnHasA2UI = false
+					} else if usageSnapshot != nil && stopReason != "tool_use" {
+						broadcastChatFinal(ctxForBroadcast, runId, sessionKey, map[string]interface{}{
+							"role": "assistant", "content": []map[string]interface{}{}, "timestamp": time.Now().UnixMilli(),
+						})
 					}
 				case api.EventError:
 					outMsg := ""
@@ -1844,8 +2622,46 @@ func ChatSendHandler(opts HandlerOpts) error {
 				return
 			}
 
-			// If no message_stop was received but we have text, append and broadcast
-			if textBuf.Len() > 0 && len(assistantContent) == 0 {
+			// Flush assistant content that never received MessageStop (e.g. A2UI-only after tools).
+			if len(assistantContent) > 0 {
+				if textBuf.Len() > 0 {
+					text := textBuf.String()
+					if !shouldSuppressAssistantTextForA2UI(text, assistantContent, turnHasA2UI) {
+						assistantContent = append(assistantContent, map[string]interface{}{"type": "text", "text": text})
+					}
+				}
+				assistantContent = normalizeAssistantContentForA2UI(
+					assistantContent,
+					true,
+					func(raw json.RawMessage) {
+						broadcastChatA2UI(ctxForBroadcast, runId, sessionKey, raw)
+					},
+				)
+				assistantContent = tools.MergeDeliverableAttachmentBlocks(assistantContent, projectRoot)
+				if snap, ok := publishAssistantSnapshot(assistantSnapshotParams{
+					ctx:               ctxForBroadcast,
+					runId:             runId,
+					sessionKey:        sessionKey,
+					transcriptPath:    transcriptPath,
+					projectRoot:       projectRoot,
+					content:           assistantContent,
+					stopReason:        stopReason,
+					modelRef:          modelRefForRun,
+					runStart:          runStart,
+					firstTokenTime:    firstTokenTime,
+					totalToolDuration: totalToolDurationMs,
+					usage:             usageSnapshot,
+					parentMessageID:   lastMessageID,
+				}); ok {
+					lastMessageID = snap.lastMessageID
+					if snap.imPlain != "" {
+						streamIMPlain = snap.imPlain
+						lastAssistantContent = snap.imPlain
+					}
+				}
+				assistantContent = nil
+				textBuf.Reset()
+			} else if textBuf.Len() > 0 {
 				output := textBuf.String()
 				durationMs := time.Since(runStart).Milliseconds()
 				var finalFirstTokenMs int64
@@ -1873,14 +2689,29 @@ func ChatSendHandler(opts HandlerOpts) error {
 				if err := session.AppendAssistantMessageWithUsage(transcriptPath, output, opts); err != nil {
 					chatLog.Error("failed to append assistant message transcriptPath=%s runId=%s error=%v", transcriptPath, runId, err)
 				} else {
+					fallbackContent := tools.MergeDeliverableAttachmentBlocks(
+						[]map[string]interface{}{{"type": "text", "text": output}},
+						projectRoot,
+					)
 					messageBody := map[string]interface{}{
 						"role":             "assistant",
-						"content":          []map[string]interface{}{{"type": "text", "text": output}},
+						"content":          fallbackContent,
 						"timestamp":        time.Now().UnixMilli(),
 						"durationMs":       durationMs,
 						"firstTokenMs":     finalFirstTokenMs,
 						"toolDurationMs":   totalToolDurationMs,
 						"outputDurationMs": finalOutputMs,
+					}
+					if usageSnapshot != nil {
+						total := usageSnapshot.InputTokens + usageSnapshot.OutputTokens
+						messageBody["usage"] = map[string]interface{}{
+							"input":       usageSnapshot.InputTokens,
+							"output":      usageSnapshot.OutputTokens,
+							"totalTokens": total,
+						}
+					}
+					if modelRefForRun != "" {
+						messageBody["model"] = modelRefForRun
 					}
 					broadcastChatFinal(ctxForBroadcast, runId, sessionKey, messageBody)
 					cronSummary := extractAssistantTextForIMDelivery(messageBody)
@@ -2005,6 +2836,7 @@ func handleChatNewCommand(opts HandlerOpts) error {
 		}
 		runtime.ClearSessionHistory(projectRoot, oldSessionID)
 	}
+	runtime.EvictSessionRuntime(sessionKey)
 
 	transcriptPath := session.ResolveSessionFilePath(next.SessionID, nil, env)
 	if err := session.EnsureTranscriptFile(transcriptPath, next.SessionID); err != nil {
@@ -2257,4 +3089,59 @@ func ChatInjectHandler(opts HandlerOpts) error {
 		"messageId": messageID,
 	}, nil, nil)
 	return nil
+}
+
+// ChatA2UIActionHandler handles "chat.a2ui.action" — user interactions from A2UI components.
+func ChatA2UIActionHandler(opts HandlerOpts) error {
+	sessionKey, _ := opts.Params["sessionKey"].(string)
+	sessionKey = strings.TrimSpace(strings.ToLower(sessionKey))
+	if sessionKey == "" {
+		sessionKey = "main"
+	}
+
+	userAction, _ := opts.Params["userAction"].(map[string]interface{})
+	if userAction == nil {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.a2ui.action: userAction required",
+		}, nil)
+		return nil
+	}
+
+	actionName, _ := userAction["name"].(string)
+	actionName = strings.TrimSpace(actionName)
+	if actionName == "" {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInvalidRequest,
+			Message: "chat.a2ui.action: userAction.name required",
+		}, nil)
+		return nil
+	}
+
+	ctxJSON, err := json.Marshal(userAction)
+	if err != nil {
+		opts.Respond(false, nil, &protocol.ErrorShape{
+			Code:    protocol.ErrCodeInternal,
+			Message: "chat.a2ui.action: marshal failed",
+		}, nil)
+		return nil
+	}
+	message := fmt.Sprintf("[A2UI Action: %s]\n%s", actionName, string(ctxJSON))
+
+	sendParams := map[string]interface{}{
+		"sessionKey": sessionKey,
+		"message":    message,
+		"deliver":    false,
+	}
+	if idem, ok := opts.Params["idempotencyKey"].(string); ok && strings.TrimSpace(idem) != "" {
+		sendParams["idempotencyKey"] = strings.TrimSpace(idem)
+	} else {
+		sendParams["idempotencyKey"] = uuid.New().String()
+	}
+
+	return ChatSendHandler(HandlerOpts{
+		Context: opts.Context,
+		Params:  sendParams,
+		Respond: opts.Respond,
+	})
 }

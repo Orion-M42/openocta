@@ -21,6 +21,7 @@ const allowedTags = [
   "h4",
   "hr",
   "i",
+  "img",
   "li",
   "ol",
   "p",
@@ -35,7 +36,7 @@ const allowedTags = [
   "ul",
 ];
 
-const allowedAttrs = ["class", "href", "rel", "target", "title", "start"];
+const allowedAttrs = ["class", "href", "rel", "target", "title", "start", "src", "alt"];
 
 let hooksInstalled = false;
 const MARKDOWN_CHAR_LIMIT = 140_000;
@@ -72,15 +73,27 @@ function installHooks() {
   hooksInstalled = true;
 
   DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-    if (!(node instanceof HTMLAnchorElement)) {
+    if (node instanceof HTMLAnchorElement) {
+      const href = node.getAttribute("href");
+      if (!href) {
+        return;
+      }
+      if (!href.includes("://") && /^attachments\//i.test(href)) {
+        node.setAttribute("data-chat-attachment", href);
+        node.setAttribute("href", "#");
+        node.classList.add("chat-attachment-link");
+        return;
+      }
+      node.setAttribute("rel", "noreferrer noopener");
+      node.setAttribute("target", "_blank");
       return;
     }
-    const href = node.getAttribute("href");
-    if (!href) {
-      return;
+    if (node instanceof HTMLImageElement) {
+      const src = node.getAttribute("src");
+      if (!src || !isAllowedImageSrc(src)) {
+        node.removeAttribute("src");
+      }
     }
-    node.setAttribute("rel", "noreferrer noopener");
-    node.setAttribute("target", "_blank");
   });
 }
 
@@ -121,6 +134,15 @@ export function toSanitizedMarkdownHtml(markdown: string): string {
     setCachedMarkdown(input, sanitized);
   }
   return sanitized;
+}
+
+function isAllowedImageSrc(src: string): boolean {
+  const trimmed = src.trim().toLowerCase();
+  return (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://")
+  );
 }
 
 function escapeHtml(value: string): string {

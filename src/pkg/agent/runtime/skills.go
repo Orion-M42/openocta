@@ -396,6 +396,89 @@ func BuildSkillsPrompt(entries []agentSkills.Entry, cfg *config.OpenOctaConfig) 
 	return "## 可用技能\n\n" + body
 }
 
+// FilterSkillRegistrations keeps registrations whose Definition.Name matches any allowed key (case-insensitive).
+func FilterSkillRegistrations(regs []api.SkillRegistration, allowed []string) []api.SkillRegistration {
+	if len(allowed) == 0 {
+		return nil
+	}
+	allowSet := make(map[string]struct{}, len(allowed))
+	for _, k := range allowed {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		allowSet[strings.ToLower(k)] = struct{}{}
+	}
+	if len(allowSet) == 0 {
+		return nil
+	}
+	out := make([]api.SkillRegistration, 0, len(regs))
+	for _, r := range regs {
+		name := strings.ToLower(strings.TrimSpace(r.Definition.Name))
+		if _, ok := allowSet[name]; ok {
+			out = append(out, r)
+			continue
+		}
+		if key := strings.TrimSpace(r.Definition.Metadata["skillKey"]); key != "" {
+			if _, ok := allowSet[strings.ToLower(key)]; ok {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+func uniqueAbsSkillBaseDirsFromRegs(regs []api.SkillRegistration) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, r := range regs {
+		if base := strings.TrimSpace(r.Definition.Metadata["baseDir"]); base != "" {
+			abs, err := filepath.Abs(base)
+			if err != nil || abs == "" {
+				continue
+			}
+			if _, dup := seen[abs]; dup {
+				continue
+			}
+			seen[abs] = struct{}{}
+			out = append(out, abs)
+		}
+	}
+	return out
+}
+
+// FilterSkillEntries keeps entries matching allowed skill keys/names (case-insensitive).
+func FilterSkillEntries(entries []agentSkills.Entry, allowed []string) []agentSkills.Entry {
+	if len(allowed) == 0 {
+		return nil
+	}
+	allowSet := make(map[string]struct{}, len(allowed))
+	for _, k := range allowed {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		allowSet[strings.ToLower(k)] = struct{}{}
+	}
+	if len(allowSet) == 0 {
+		return nil
+	}
+	out := make([]agentSkills.Entry, 0, len(entries))
+	for _, e := range entries {
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		if _, ok := allowSet[name]; ok {
+			out = append(out, e)
+			continue
+		}
+		if e.Metadata != nil && e.Metadata.SkillKey != "" {
+			if _, ok := allowSet[strings.ToLower(strings.TrimSpace(e.Metadata.SkillKey))]; ok {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
+}
+
 // BuildSystemPromptSkillsSection loads skills for the current run (employee or workspace) and returns a system-prompt block.
 func BuildSystemPromptSkillsSection(projectRoot string, opts Options) string {
 	if !opts.EnableSkills {
@@ -412,6 +495,9 @@ func BuildSystemPromptSkillsSection(projectRoot string, opts Options) string {
 	}
 	if len(entries) == 0 {
 		entries, _ = LoadWorkspaceSkillEntries(projectRoot, opts.Config)
+	}
+	if opts.SkillFilter != nil {
+		entries = FilterSkillEntries(entries, *opts.SkillFilter)
 	}
 	prompt := BuildSkillsPrompt(entries, opts.Config)
 	if prompt == "" {

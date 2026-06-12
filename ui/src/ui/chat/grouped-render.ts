@@ -13,10 +13,37 @@ import {
 import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer.ts";
 import { extractToolCards } from "./tool-cards.ts";
 import { resolveToolDisplay } from "../tool-display.ts";
+import { extractA2UIBlocks, extractA2UITextMarkdown } from "./a2ui-bridge.ts";
+import { isA2UIProtocolTool } from "./constants.ts";
+import {
+  extractFileBlocks,
+  extractGroupFileBlocks,
+  extractReferencedPathsFromGroup,
+  renderFileAttachments,
+  renderImageFileBlocks,
+  type FileBlock,
+  type FilePreviewRequest,
+} from "./file-blocks.ts";
+import {
+  normalizeLocalImagePath,
+  parseMarkdownLocalImageRefs,
+  stripMarkdownLocalImageRefs,
+} from "./attachment-images.ts";
+import {
+  parseOpenOctaAttachmentsFromText,
+  stripOpenOctaAttachmentsMarker,
+} from "./openocta-attachments.ts";
+import { extractGroupMeta, formatTokenSummary } from "./message-meta.ts";
+import type { GatewayBrowserClient } from "../gateway.ts";
+import "../components/chat-a2ui-panel.ts";
+import "../components/chat-deliverable-attachments.ts";
+import "../components/chat-local-image.ts";
 
 type ImageBlock = {
   url: string;
   alt?: string;
+  filename?: string;
+  localPath?: string;
 };
 
 function extractDurationMs(message: unknown): number | null {
@@ -98,10 +125,62 @@ function groupElapsedMs(group: MessageGroup): number | null {
   return elapsed > 0 ? elapsed : null;
 }
 
+function pushUniqueImage(images: ImageBlock[], next: ImageBlock) {
+  const key = next.localPath || next.url;
+  if (!key) {
+    return;
+  }
+  if (images.some((img) => (img.localPath || img.url) === key)) {
+    return;
+  }
+  images.push(next);
+}
+
+function extractGroupImageKeys(messages: Array<{ message: unknown }>): Set<string> {
+  const keys = new Set<string>();
+  for (const item of messages) {
+    for (const img of extractImages(item.message)) {
+      if (img.localPath) {
+        keys.add(normalizeLocalImagePath(img.localPath));
+      }
+      if (img.filename) {
+        keys.add(img.filename);
+      }
+      if (img.url) {
+        keys.add(img.url);
+      }
+    }
+  }
+  return keys;
+}
+
+function isPathCoveredByImageKeys(path: string, keys: Set<string>, groupFiles: FileBlock[]): boolean {
+  const base = path.split("/").pop() ?? path;
+  const normalized = normalizeLocalImagePath(path);
+  if (keys.has(path) || keys.has(base) || keys.has(normalized)) {
+    return true;
+  }
+  return groupFiles.some((file) => file.filename === base || file.filename === path);
+}
+
 function extractImages(message: unknown): ImageBlock[] {
   const m = message as Record<string, unknown>;
   const content = m.content;
   const images: ImageBlock[] = [];
+
+  if (typeof content === "string") {
+    for (const img of parseOpenOctaAttachmentsFromText(content)) {
+      pushUniqueImage(images, img);
+    }
+    for (const ref of parseMarkdownLocalImageRefs(content)) {
+      pushUniqueImage(images, {
+        url: "",
+        alt: ref.alt,
+        filename: ref.path.split("/").pop(),
+        localPath: ref.path,
+      });
+    }
+  }
 
   if (Array.isArray(content)) {
     for (const block of content) {
@@ -118,15 +197,35 @@ function extractImages(message: unknown): ImageBlock[] {
           const mediaType = (source.media_type as string) || "image/png";
           // If data is already a data URL, use it directly
           const url = data.startsWith("data:") ? data : `data:${mediaType};base64,${data}`;
-          images.push({ url });
+          const filename = typeof b.filename === "string" ? b.filename : undefined;
+          pushUniqueImage(images, { url, filename });
         } else if (typeof b.url === "string") {
-          images.push({ url: b.url });
+          const filename = typeof b.filename === "string" ? b.filename : undefined;
+          pushUniqueImage(images, { url: b.url, filename });
+        } else if (typeof b.data === "string") {
+          const data = b.data;
+          const mediaType = (b.mimeType as string) || (b.media_type as string) || "image/png";
+          const url = data.startsWith("data:") ? data : `data:${mediaType};base64,${data}`;
+          const filename = typeof b.filename === "string" ? b.filename : undefined;
+          pushUniqueImage(images, { url, filename });
         }
       } else if (b.type === "image_url") {
         // OpenAI format
         const imageUrl = b.image_url as Record<string, unknown> | undefined;
         if (typeof imageUrl?.url === "string") {
-          images.push({ url: imageUrl.url });
+          pushUniqueImage(images, { url: imageUrl.url });
+        }
+      } else if (b.type === "text" && typeof b.text === "string") {
+        for (const img of parseOpenOctaAttachmentsFromText(b.text)) {
+          pushUniqueImage(images, img);
+        }
+        for (const ref of parseMarkdownLocalImageRefs(b.text)) {
+          pushUniqueImage(images, {
+            url: "",
+            alt: ref.alt,
+            filename: ref.path.split("/").pop(),
+            localPath: ref.path,
+          });
         }
       }
     }
@@ -135,18 +234,64 @@ function extractImages(message: unknown): ImageBlock[] {
   return images;
 }
 
-export function renderReadingIndicatorGroup(assistant?: AssistantIdentity, startedAt?: number) {
+function nonImageFileBlocks(files: FileBlock[]): FileBlock[] {
+  return files.filter((file) => !file.mimeType.toLowerCase().startsWith("image/"));
+}
+
+function runPhaseLabel(phase?: "thinking" | "tool" | "streaming"): string {
+  if (phase === "tool") {
+    return "正在调用工具…";
+  }
+  if (phase === "streaming") {
+    return "正在生成回复…";
+  }
+  return "思考中…";
+}
+
+function renderAssistantAvatar(
+  assistant?: AssistantIdentity,
+  opts?: { busy?: boolean },
+) {
+  return html`
+    <div class="chat-avatar-wrap ${opts?.busy ? "chat-avatar-wrap--busy" : ""}">
+      ${renderAvatar("assistant", assistant)}
+      ${opts?.busy ? html`<span class="chat-avatar-spinner" aria-hidden="true">${icons.loader2}</span>` : nothing}
+    </div>
+  `;
+}
+
+export function renderReadingIndicatorGroup(
+  assistant?: AssistantIdentity,
+  startedAt?: number,
+  phase?: "thinking" | "tool" | "streaming",
+) {
+  return html`
+    <div class="chat-group assistant">
+      ${renderAssistantAvatar(assistant, { busy: true })}
+      <div class="chat-group-messages">
+        <div class="chat-bubble chat-reading-indicator" aria-live="polite">
+          <span class="chat-reading-indicator__label">${runPhaseLabel(phase)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export function renderA2UIGroup(
+  messages: unknown[],
+  assistant?: AssistantIdentity,
+  client?: GatewayBrowserClient | null,
+  sessionKey?: string,
+  onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void,
+) {
   return html`
     <div class="chat-group assistant">
       ${renderAvatar("assistant", assistant)}
-      <div class="chat-group-messages">
-        <div class="chat-bubble chat-reading-indicator" aria-hidden="true" style="display: flex; align-items: center; gap: 8px;">
-          <span class="chat-reading-indicator__dots">
-            <span></span><span></span><span></span>
-          </span>
-          思考中...
-        </div>
-      </div>
+      <div class="chat-group-messages">${renderA2UIContent(messages, {
+        client,
+        sessionKey,
+        onA2UIAction,
+      })}</div>
     </div>
   `;
 }
@@ -165,7 +310,7 @@ export function renderStreamingGroup(
 
   return html`
     <div class="chat-group assistant">
-      ${renderAvatar("assistant", assistant)}
+      ${renderAssistantAvatar(assistant, { busy: true })}
       <div class="chat-group-messages">
         ${renderGroupedMessage(
           {
@@ -185,14 +330,66 @@ export function renderStreamingGroup(
   `;
 }
 
+function formatToolArgs(args: unknown): string {
+  if (args == null) {
+    return "";
+  }
+  if (typeof args === "string") {
+    return args.trim();
+  }
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+function renderGroupMetaFooter(group: MessageGroup, role: string) {
+  if (role !== "assistant") {
+    return nothing;
+  }
+  const meta = extractGroupMeta(group.messages);
+  const parts: string[] = [];
+  if (meta.model) {
+    parts.push(meta.model);
+  }
+  if (meta.durationMs && meta.durationMs > 0) {
+    parts.push(formatDurationShort(meta.durationMs));
+  }
+  const tokens = formatTokenSummary(meta.usage);
+  if (tokens) {
+    parts.push(tokens);
+  }
+  if (meta.endTime) {
+    parts.push(
+      new Date(meta.endTime).toLocaleString([], {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    );
+  }
+  if (parts.length === 0) {
+    return nothing;
+  }
+  return html`<div class="chat-group-meta muted">${parts.join(" · ")}</div>`;
+}
+
 export function renderMessageGroup(
   group: MessageGroup,
   opts: {
     onOpenSidebar?: (content: string) => void;
+    onFilePreview?: (req: FilePreviewRequest) => void;
     showReasoning: boolean;
     showToolTrace: boolean;
     assistantName?: string;
     assistantAvatar?: string | null;
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+    onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void;
   },
 ) {
   const normalizedRole = normalizeRoleForGrouping(group.role);
@@ -211,14 +408,20 @@ export function renderMessageGroup(
     hour: "numeric",
     minute: "2-digit",
   });
-  const footerMsLabel = "";
 
   return html`
     <div class="chat-group ${roleClass}">
-      ${renderAvatar(group.role, {
-        name: assistantName,
-        avatar: opts.assistantAvatar ?? null,
-      })}
+      ${
+        normalizedRole === "assistant"
+          ? renderAssistantAvatar(
+              { name: assistantName, avatar: opts.assistantAvatar ?? null },
+              { busy: group.isStreaming },
+            )
+          : renderAvatar(group.role, {
+              name: assistantName,
+              avatar: opts.assistantAvatar ?? null,
+            })
+      }
       <div class="chat-group-messages">
         ${
           normalizedRole === "assistant"
@@ -230,6 +433,10 @@ export function renderMessageGroup(
                     isStreaming: group.isStreaming && index === group.messages.length - 1,
                     showReasoning: opts.showReasoning,
                     showToolTrace: opts.showToolTrace,
+                    client: opts.client,
+                    sessionKey: opts.sessionKey,
+                    onFilePreview: opts.onFilePreview,
+                    onA2UIAction: opts.onA2UIAction,
                   },
                   opts.onOpenSidebar,
                 ),
@@ -238,10 +445,8 @@ export function renderMessageGroup(
         <div class="chat-group-footer">
           <span class="chat-sender-name">${who}</span>
           <span class="chat-group-timestamp">${timestamp}</span>
-          ${footerMsLabel
-            ? html`<span class="chat-group-duration muted">${footerMsLabel}</span>`
-            : nothing}
         </div>
+        ${renderGroupMetaFooter(group, normalizedRole)}
       </div>
     </div>
   `;
@@ -288,23 +493,44 @@ function isAvatarUrl(value: string): boolean {
   );
 }
 
-function renderMessageImages(images: ImageBlock[]) {
+function renderMessageImages(
+  images: ImageBlock[],
+  opts?: { client?: GatewayBrowserClient | null; sessionKey?: string },
+) {
   if (images.length === 0) {
     return nothing;
   }
 
   return html`
     <div class="chat-message-images">
-      ${images.map(
-        (img) => html`
-          <img
-            src=${img.url}
-            alt=${img.alt ?? "Attached image"}
-            class="chat-message-image"
-            @click=${() => window.open(img.url, "_blank")}
-          />
-        `,
-      )}
+      ${images.map((img) => {
+        if (img.localPath) {
+          return html`
+            <chat-local-image
+              .client=${opts?.client ?? null}
+              .sessionKey=${opts?.sessionKey ?? "main"}
+              path=${img.localPath}
+              alt=${img.alt ?? img.filename ?? "image"}
+            ></chat-local-image>
+          `;
+        }
+        const label = img.filename ?? img.alt ?? "image";
+        return html`
+          <div class="chat-message-image-wrap">
+            <img
+              src=${img.url}
+              alt=${img.alt ?? label}
+              class="chat-message-image"
+              @click=${() => window.open(img.url, "_blank")}
+            />
+            <div class="chat-message-image-actions">
+              <a class="btn btn--ghost btn--sm" href=${img.url} download=${label} @click=${(e: Event) => e.stopPropagation()}
+                >下载</a
+              >
+            </div>
+          </div>
+        `;
+      })}
     </div>
   `;
 }
@@ -412,22 +638,23 @@ function toolCommandText(card: ToolCard): string {
 
 function extractToolOutputText(doc: string): string {
   const trimmed = doc.trim();
-  if (!trimmed.startsWith("{")) {
-    return doc;
-  }
-  try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    if (typeof parsed.output === "string" && parsed.output.trim()) {
-      return parsed.output;
+  let output = doc;
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (typeof parsed.output === "string" && parsed.output.trim()) {
+        output = parsed.output;
+      } else {
+        const nested = parsed.data as Record<string, unknown> | undefined;
+        if (typeof nested?.output === "string" && nested.output.trim()) {
+          output = nested.output;
+        }
+      }
+    } catch {
+      output = doc;
     }
-    const nested = parsed.data as Record<string, unknown> | undefined;
-    if (typeof nested?.output === "string" && nested.output.trim()) {
-      return nested.output;
-    }
-  } catch {
-    return doc;
   }
-  return doc;
+  return stripOpenOctaAttachmentsMarker(output);
 }
 
 function formatToolRunLabel(cards: ToolCard[]): string {
@@ -452,6 +679,7 @@ function renderInlineToolCall(card: ToolCard) {
 type ToolRunEntry = {
   command: string;
   tool: string;
+  input: string;
   output: string;
   success: boolean;
   durationMs?: number;
@@ -504,10 +732,16 @@ function segmentAssistantTurn(
     const cards = extractToolCards(message);
     const text = extractTextCached(message)?.trim() ?? "";
     const thinking = extractThinkingCached(message)?.trim() ?? "";
+    const images = extractImages(message);
+    const fileBlocks = extractFileBlocks(message);
+    const a2uiBlocks = extractA2UIBlocks(message);
     const isToolResult = isToolResultLikeMessage(message);
     const callCards = cards.filter((card) => card.kind === "call");
 
-    if ((text || thinking) && !isToolResult) {
+    if (
+      (text || thinking || images.length > 0 || fileBlocks.length > 0 || a2uiBlocks.length > 0) &&
+      !isToolResult
+    ) {
       segments.push({ type: "text", message, isStreaming });
       currentToolSegment = null;
       currentRun = null;
@@ -519,9 +753,13 @@ function segmentAssistantTurn(
         segments.push(currentToolSegment);
       }
       for (const card of callCards) {
+        if (isA2UIProtocolTool(card.name)) {
+          continue;
+        }
         currentRun = {
           command: toolCommandText(card),
           tool: card.name || "tool",
+          input: formatToolArgs(card.args),
           output: "",
           success: true,
         };
@@ -530,6 +768,14 @@ function segmentAssistantTurn(
     }
 
     if (isToolResult) {
+      const toolName =
+        cards[0]?.name ||
+        (typeof (message as Record<string, unknown>).toolName === "string"
+          ? ((message as Record<string, unknown>).toolName as string)
+          : "");
+      if (isA2UIProtocolTool(toolName)) {
+        continue;
+      }
       const output = text ? extractToolOutputText(text) : "";
       const durationMs = extractDurationMs(message) ?? undefined;
       if (!currentToolSegment) {
@@ -548,12 +794,20 @@ function segmentAssistantTurn(
         const newRun = {
           command: "command",
           tool: cards[0]?.name || "tool",
+          input: "",
           output,
           success: inferToolSuccess(output),
           durationMs,
         };
         currentToolSegment.runs.push(newRun);
         currentRun = newRun;
+      }
+      const toolImages = extractImages(message);
+      const toolFiles = extractFileBlocks(message);
+      if (toolImages.length > 0 || toolFiles.length > 0) {
+        segments.push({ type: "text", message, isStreaming: false });
+        currentToolSegment = null;
+        currentRun = null;
       }
     }
   }
@@ -673,7 +927,7 @@ function renderToolSegment(
                   return nothing;
                 }
                 return html`
-                  <details class="chat-turn-command" ?open=${!run.success}>
+                  <details class="chat-turn-command" ?open=${!run.success || isStreaming}>
                     <summary class="chat-turn-command__summary">
                       <span class="chat-turn-command__prompt">$</span>
                       <span class="chat-turn-command__text">
@@ -681,7 +935,20 @@ function renderToolSegment(
                       </span>
                       <span class="chat-turn-command__status-dot ${run.success ? "success" : "failed"}"></span>
                     </summary>
-                    <pre class="chat-tool-run__output">${run.output || "(no output)"}</pre>
+                    ${
+                      run.input
+                        ? html`
+                            <div class="chat-tool-io">
+                              <div class="chat-tool-io__label">输入</div>
+                              <pre class="chat-tool-run__output">${run.input}</pre>
+                            </div>
+                          `
+                        : nothing
+                    }
+                    <div class="chat-tool-io">
+                      <div class="chat-tool-io__label">输出</div>
+                      <pre class="chat-tool-run__output">${run.output || "(no output)"}</pre>
+                    </div>
                   </details>
                 `;
               })}
@@ -697,8 +964,12 @@ function renderAssistantTurnMessages(
   group: MessageGroup,
   opts: {
     onOpenSidebar?: (content: string) => void;
+    onFilePreview?: (req: FilePreviewRequest) => void;
     showReasoning: boolean;
     showToolTrace: boolean;
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+    onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void;
   },
 ) {
   const segments = segmentAssistantTurn(group.messages, !!group.isStreaming);
@@ -706,13 +977,23 @@ function renderAssistantTurnMessages(
     return nothing;
   }
 
+  const groupFiles = extractGroupFileBlocks(group.messages);
+  const groupImageKeys = extractGroupImageKeys(group.messages);
+  const referencedPaths = extractReferencedPathsFromGroup(group.messages);
+  const unresolvedPaths = referencedPaths.filter(
+    (path) => !isPathCoveredByImageKeys(path, groupImageKeys, groupFiles),
+  );
+
   // Find the last segment that is a text segment and contains actual text (the final assistant response)
   let finalResponseIdx = -1;
   for (let i = segments.length - 1; i >= 0; i--) {
     const seg = segments[i];
     if (seg.type === "text") {
       const text = extractTextCached(seg.message)?.trim() ?? "";
-      if (text) {
+      const images = extractImages(seg.message);
+      const files = extractFileBlocks(seg.message);
+      const a2uiBlocks = extractA2UIBlocks(seg.message);
+      if (text || images.length > 0 || files.length > 0 || a2uiBlocks.length > 0) {
         finalResponseIdx = i;
         break;
       }
@@ -732,21 +1013,34 @@ function renderAssistantTurnMessages(
   return html`
     ${processSegments.length > 0
       ? html`
-          <details class="chat-process-details" ?open=${!!group.isStreaming}>
+          <details class="chat-process-details" ?open=${!!group.isStreaming || processSegments.some((s) => s.type === "tools")}>
             <summary class="chat-process-summary">
-              <span class="chat-process-summary__icon">${icons.wrench}</span>
+              <span class="chat-process-summary__icon">
+                ${group.isStreaming ? icons.loader2 : icons.wrench}
+              </span>
               <span class="chat-process-summary__title">思考及工具运行过程</span>
+              ${
+                group.isStreaming
+                  ? html`<span class="chat-process-summary__status">运行中</span>`
+                  : nothing
+              }
               <span class="chat-process-summary__chevron">${icons.chevronRight}</span>
             </summary>
             <div class="chat-process-content">
               ${processSegments.map((seg) => {
                 if (seg.type === "text") {
+                  const hasThinking = Boolean(extractThinkingCached(seg.message)?.trim());
                   return renderGroupedMessage(
                     seg.message,
                     {
                       isStreaming: seg.isStreaming,
-                      showReasoning: opts.showReasoning,
+                      showReasoning: opts.showReasoning || hasThinking,
                       showToolTrace: false,
+                      hideFileAttachments: true,
+                      client: opts.client,
+                      sessionKey: opts.sessionKey,
+                      onFilePreview: opts.onFilePreview,
+                      onA2UIAction: opts.onA2UIAction,
                     },
                     opts.onOpenSidebar,
                   );
@@ -759,17 +1053,35 @@ function renderAssistantTurnMessages(
         `
       : nothing}
 
-    ${finalResponseSegment
+    ${finalResponseSegment?.type === "text"
       ? renderGroupedMessage(
           finalResponseSegment.message,
           {
             isStreaming: finalResponseSegment.isStreaming,
             showReasoning: false, // Reasoning has been rendered inside processSegments
             showToolTrace: false,
+            hideFileAttachments: true,
+            client: opts.client,
+            sessionKey: opts.sessionKey,
+            onFilePreview: opts.onFilePreview,
+            onA2UIAction: opts.onA2UIAction,
           },
           opts.onOpenSidebar,
         )
       : nothing}
+    ${renderImageFileBlocks(groupFiles, opts.onFilePreview)}
+    ${renderFileAttachments(nonImageFileBlocks(groupFiles), opts.onFilePreview)}
+    ${
+      unresolvedPaths.length > 0
+        ? html`<chat-deliverable-attachments
+            .client=${opts.client ?? null}
+            .sessionKey=${opts.sessionKey ?? "main"}
+            .paths=${unresolvedPaths}
+            .existing=${groupFiles as FileBlock[]}
+            .onFilePreview=${opts.onFilePreview}
+          ></chat-deliverable-attachments>`
+        : nothing
+    }
   `;
 }
 
@@ -779,7 +1091,12 @@ function renderCollapsedToolResult(
   images: ImageBlock[],
   markdown: string | null,
   reasoningMarkdown: string | null,
-  opts: { isStreaming: boolean; showReasoning: boolean },
+  opts: {
+    isStreaming: boolean;
+    showReasoning: boolean;
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+  },
   _onOpenSidebar?: (content: string) => void,
 ) {
   const bodyDoc = mergeToolExpandableBody(markdown, toolCards);
@@ -816,7 +1133,7 @@ function renderCollapsedToolResult(
               `
             : nothing
         }
-        ${renderMessageImages(images)}
+        ${renderMessageImages(images, { client: opts.client, sessionKey: opts.sessionKey })}
         ${
           outputText
             ? html`
@@ -832,9 +1149,56 @@ function renderCollapsedToolResult(
   `;
 }
 
+function renderA2UIContent(
+  blocks: unknown[],
+  opts: {
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+    onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void;
+    inline?: boolean;
+  },
+) {
+  if (blocks.length === 0) {
+    return nothing;
+  }
+  const textMarkdown = extractA2UITextMarkdown(blocks);
+  if (textMarkdown) {
+    return html`<div class="chat-text">${unsafeHTML(toSanitizedMarkdownHtml(textMarkdown))}</div>`;
+  }
+  return html`<chat-a2ui-panel
+    ?inline=${opts.inline ?? false}
+    .showTitle=${!(opts.inline ?? false)}
+    .client=${opts.client ?? null}
+    .sessionKey=${opts.sessionKey ?? "main"}
+    .messages=${blocks}
+    .onA2UIAction=${opts.onA2UIAction ?? null}
+  ></chat-a2ui-panel>`;
+}
+
+function renderA2UIBlocks(
+  message: unknown,
+  opts: {
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+    onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void;
+  },
+) {
+  const blocks = extractA2UIBlocks(message);
+  return renderA2UIContent(blocks, { ...opts, inline: true });
+}
+
 function renderGroupedMessage(
   message: unknown,
-  opts: { isStreaming: boolean; showReasoning: boolean; showToolTrace: boolean },
+  opts: {
+    isStreaming: boolean;
+    showReasoning: boolean;
+    showToolTrace: boolean;
+    hideFileAttachments?: boolean;
+    client?: GatewayBrowserClient | null;
+    sessionKey?: string;
+    onA2UIAction?: (action: import("@a2ui/web_core/v0_9").A2uiClientAction) => Promise<void> | void;
+    onFilePreview?: (req: FilePreviewRequest) => void;
+  },
   onOpenSidebar?: (content: string) => void,
 ) {
   const m = message as Record<string, unknown>;
@@ -854,13 +1218,21 @@ function renderGroupedMessage(
   const hasToolCards = toolCards.length > 0;
   const images = extractImages(message);
   const hasImages = images.length > 0;
+  const a2uiBlocks = extractA2UIBlocks(message);
+  const hasA2UI = a2uiBlocks.length > 0;
+  const fileBlocks = extractFileBlocks(message);
+  const hasFiles = fileBlocks.length > 0;
 
   const extractedText = extractTextCached(message);
   const extractedThinking =
     opts.showReasoning && role === "assistant" ? extractThinkingCached(message) : null;
-  const markdownBase = extractedText?.trim() ? extractedText : null;
+  const markdownBase =
+    hasA2UI ? null : extractedText?.trim() ? extractedText : null;
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
-  const markdown = markdownBase;
+  let markdown = markdownBase ? stripMarkdownLocalImageRefs(markdownBase) : null;
+  if (markdown && !markdown.trim()) {
+    markdown = null;
+  }
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
 
   const bubbleClasses = [
@@ -883,14 +1255,16 @@ function renderGroupedMessage(
     );
   }
 
-  if (!markdown && !hasToolCards && !hasImages) {
+  if (!markdown && !hasToolCards && !hasImages && !hasA2UI && !hasFiles && !reasoningMarkdown) {
     return nothing;
   }
 
   return html`
     <div class="${bubbleClasses}">
       ${canCopyMarkdown ? renderCopyAsMarkdownButton(markdown!) : nothing}
-      ${renderMessageImages(images)}
+      ${renderMessageImages(images, { client: opts.client, sessionKey: opts.sessionKey })}
+      ${opts.hideFileAttachments ? nothing : renderFileAttachments(nonImageFileBlocks(fileBlocks), opts.onFilePreview)}
+      ${opts.hideFileAttachments ? nothing : renderImageFileBlocks(fileBlocks, opts.onFilePreview)}
       ${
         reasoningMarkdown
           ? html`
@@ -910,6 +1284,7 @@ function renderGroupedMessage(
           ? html`<div class="chat-text">${unsafeHTML(toSanitizedMarkdownHtml(markdown))}</div>`
           : nothing
       }
+      ${renderA2UIBlocks(message, opts)}
       ${opts.showToolTrace
         ? toolCards.filter((card) => card.kind === "call").map(renderInlineToolCall)
         : nothing}

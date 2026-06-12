@@ -160,12 +160,14 @@ function tutorialCategories(): EduCategory[] {
 
 function tutorialProps(overrides: Partial<TutorialsProps> = {}): TutorialsProps {
   return {
+    activeTab: "video",
     loading: false,
     error: null,
     categories: tutorialCategories(),
     query: "",
     selectedCategoryId: 1,
     playingLink: null,
+    onTabChange: () => undefined,
     onQueryChange: () => undefined,
     onSelectCategory: () => undefined,
     onLessonClick: () => undefined,
@@ -852,5 +854,23 @@ describe("catalog pages", () => {
     expect(container.querySelector(".emp-detail-modal__close svg")).not.toBeNull();
     expect(container.querySelector("iframe")).not.toBeNull();
     expect(container.textContent).toContain("在哔哩哔哩打开");
+  });
+
+  it("renders documentation tab inside tutorials", () => {
+    const container = document.createElement("div");
+    renderIntoContainer(
+      renderTutorials(
+        tutorialProps({
+          activeTab: "documentation",
+          onOpenDocumentationExternal: () => undefined,
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("视频教程");
+    expect(container.textContent).toContain("文档教程");
+    expect(container.querySelector(".documentation-embed__frame")).not.toBeNull();
+    expect(container.querySelector(".tutorials-outcomes")).toBeNull();
   });
 });

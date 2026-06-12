@@ -15,6 +15,17 @@ describe("extractTextCached", () => {
     expect(extractTextCached(message)).toBe(extractText(message));
   });
 
+  it("hides placeholder text when tool calls are present", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "." },
+        { type: "toolCall", id: "bash:1", name: "bash", arguments: { command: "ls" } },
+      ],
+    };
+    expect(extractText(message)).toBeNull();
+  });
+
   it("returns consistent output for repeated calls", () => {
     const message = {
       role: "user",

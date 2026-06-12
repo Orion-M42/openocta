@@ -100,7 +100,7 @@ func NewHub(version string, h *handlers.Registry, ctx *handlers.Context) *Hub {
 		"node.rename", "node.list", "node.describe", "node.invoke", "node.invoke.result", "node.event",
 		"system-presence", "system-event", "send", "agent",
 		"agent.identity.get", "agent.wait", "browser.request",
-		"chat.history", "chat.abort", "chat.send", "chat.inject",
+		"chat.history", "chat.attachment.read", "chat.abort", "chat.send", "chat.extractSkill", "chat.inject", "chat.a2ui.action",
 		"web.login.start", "web.login.wait",
 		"cron.list", "cron.status", "cron.add", "cron.remove", "cron.update", "cron.run", "cron.runs",
 	}

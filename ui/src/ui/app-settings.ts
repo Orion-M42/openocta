@@ -22,6 +22,7 @@ import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
+import { loadUsage } from "./controllers/usage.ts";
 import { loadDigitalEmployees } from "./controllers/digital-employees.ts";
 import { loadTraceList } from "./controllers/llm-trace.ts";
 import { syncLlmTraceFromConfig } from "./app-llm-trace.ts";
@@ -55,6 +56,7 @@ type SettingsHost = {
   eventLogBuffer: unknown[];
   securityForm?: unknown;
   basePath: string;
+  tutorialsActiveTab?: import("./views/tutorials.ts").TutorialTab;
   agentsList?: AgentsListResult | null;
   agentsSelectedId?: string | null;
   agentsPanel?: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
@@ -282,6 +284,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "chat" || host.tab === "message") {
     await loadConfig(host as unknown as Parameters<typeof loadConfig>[0]);
+    await loadSkills(host as unknown as OpenClawApp);
     await refreshChat(host as unknown as Parameters<typeof refreshChat>[0]);
     void loadDigitalEmployees(host as unknown as Parameters<typeof loadDigitalEmployees>[0]);
     scheduleChatScroll(
@@ -387,16 +390,23 @@ function normalizeLegacyChatSessionPath(host: SettingsHost): void {
   window.history.replaceState({}, "", url.toString());
 }
 
+function resolveRouteTab(host: SettingsHost, tab: Tab): Tab {
+  if (tab === "documentation") {
+    host.tutorialsActiveTab = "documentation";
+    return "tutorials";
+  }
+  if (tab === "config") {
+    return "overview";
+  }
+  return tab;
+}
+
 export function syncTabWithLocation(host: SettingsHost, replace: boolean) {
   if (typeof window === "undefined") {
     return;
   }
   normalizeLegacyChatSessionPath(host);
-  let resolved = tabFromPath(window.location.pathname, host.basePath) ?? "chat";
-  // 配置入口默认进入概览
-  if (resolved === "config") {
-    resolved = "overview";
-  }
+  const resolved = resolveRouteTab(host, tabFromPath(window.location.pathname, host.basePath) ?? "chat");
   setTabFromRoute(host, resolved);
   syncUrlWithTab(host, resolved, replace);
 }
@@ -406,13 +416,11 @@ export function onPopState(host: SettingsHost) {
     return;
   }
   normalizeLegacyChatSessionPath(host);
-  let resolved = tabFromPath(window.location.pathname, host.basePath);
-  if (!resolved) {
+  const rawTab = tabFromPath(window.location.pathname, host.basePath);
+  if (!rawTab) {
     return;
   }
-  if (resolved === "config") {
-    resolved = "overview";
-  }
+  const resolved = resolveRouteTab(host, rawTab);
 
   const url = new URL(window.location.href);
   const session = url.searchParams.get("session")?.trim();
@@ -497,6 +505,9 @@ export async function loadOverview(host: SettingsHost) {
     loadSessions(host as unknown as OpenClawApp, { includeLastMessage: true }),
     loadCronStatus(host as unknown as OpenClawApp),
     loadDebug(host as unknown as OpenClawApp),
+    loadUsage(host as unknown as Parameters<typeof loadUsage>[0]),
+    loadSkills(host as unknown as OpenClawApp),
+    loadConfig(host as unknown as OpenClawApp),
   ]);
 }
 

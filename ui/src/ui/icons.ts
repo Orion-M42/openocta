@@ -213,6 +213,12 @@ export const icons = {
       <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
     </svg>
   `,
+  pin: html`
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 17v5" />
+      <path d="M9 3h6l1 7h4l-7 8v-5H8l-1-7z" />
+    </svg>
+  `,
   x: html`
     <svg viewBox="0 0 1024 1024">
       <path

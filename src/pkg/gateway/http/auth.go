@@ -58,6 +58,7 @@ func (s *Server) validateGatewayToken(r *http.Request) bool {
 
 // writeTokenError writes 401 JSON response with a clear message.
 func writeTokenError(w http.ResponseWriter) {
+	setSiteProxyCORSHeaders(w)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":"网关令牌无效或未提供。请在 Control UI 的 Overview 中配置正确的 Gateway Token，或使用 openocta doctor --generate-gateway-token 生成。","code":"invalid_gateway_token"}`))

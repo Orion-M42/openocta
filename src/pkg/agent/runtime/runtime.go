@@ -14,6 +14,7 @@ import (
 
 	"github.com/stellarlinkco/agentsdk-go/pkg/middleware"
 
+	agenttools "github.com/openocta/openocta/pkg/agent/tools"
 	"github.com/openocta/openocta/pkg/config"
 	"github.com/openocta/openocta/pkg/paths"
 	octasecurity "github.com/openocta/openocta/pkg/security"
@@ -22,6 +23,7 @@ import (
 	"github.com/stellarlinkco/agentsdk-go/pkg/model"
 	"github.com/stellarlinkco/agentsdk-go/pkg/sandbox"
 	"github.com/stellarlinkco/agentsdk-go/pkg/tool"
+	toolbuiltin "github.com/stellarlinkco/agentsdk-go/pkg/tool/builtin"
 )
 
 // Runtime wraps agentsdk-go Runtime for OPENOCTA.
@@ -58,8 +60,26 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	// Built-in tools (bash, file_read, file_write, grep, glob, etc.) plus any caller-provided tools.
 	// When sandbox disabled, use NewDisabledSandbox so tools skip path/permission validation.
 	tools := BuiltinTools(projectRoot, !enableSandbox)
+	if shouldRegisterWebTools(opts) {
+		for _, t := range agenttools.WebToolsFromConfig(opts.Config, projectRoot) {
+			tools = append(tools, t)
+		}
+	}
+	if shouldRegisterBrowserTools(opts) {
+		for _, t := range agenttools.BrowserToolsFromConfig(opts.Config) {
+			tools = append(tools, t)
+		}
+	}
 	if len(opts.Tools) > 0 {
-		tools = append(tools, opts.Tools...)
+		extra := opts.Tools
+		if opts.EnableWebTools != nil && !*opts.EnableWebTools {
+			extra = agenttools.FilterOutWebTools(extra)
+		}
+		tools = append(tools, extra...)
+	}
+	// A2UI protocol tools (a2ui_push / a2ui_reset) for agent-driven UI in chat.
+	for _, t := range toolbuiltin.A2UITools() {
+		tools = append(tools, t)
 	}
 	apiOpts := api.Options{
 		ModelFactory: opts.ModelFactory,
@@ -117,10 +137,17 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 			regs = mergeSkillRegistrations(regs, empRegs)
 			dirs = mergeAbsDirs(dirs, empDirs)
 		}
+		if opts.SkillFilter != nil {
+			regs = FilterSkillRegistrations(regs, *opts.SkillFilter)
+			dirs = uniqueAbsSkillBaseDirsFromRegs(regs)
+		}
 		if len(regs) > 0 {
 			apiOpts.Skills = regs
 		}
 		skillSandboxDirs = dirs
+	}
+	if len(opts.DisallowedTools) > 0 {
+		apiOpts.DisallowedTools = append([]string(nil), opts.DisallowedTools...)
 	}
 	if opts.EnableSubagents && len(opts.Subagents) > 0 {
 		apiOpts.Subagents = opts.Subagents
@@ -262,7 +289,12 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	if approvalQ != nil {
-		mw = append(mw, approvalQueueMiddleware(approvalQ, approvalBlockWait))
+		mw = append(mw, approvalQueueMiddleware(approvalQueueOptions{
+			Queue:                approvalQ,
+			BlockWait:            approvalBlockWait,
+			CommandPolicy:        commandPolicy,
+			AutoAllowSandboxBash: enableSandbox,
+		}))
 	}
 
 	// Browser navigation deduplication: prevents LLM from repeatedly opening
@@ -282,8 +314,31 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	apiOpts.Middleware = mw
+	// Enable A2UI stream events and tools in agentsdk-go.
+	{
+		v := true
+		apiOpts.EnableA2UI = &v
+	}
 	// Skylark 在运行时构建阶段强制关闭，不读取 OPENOCTA_SKYLARK / agents.defaults.skylark / opts.Skylark。
 	apiOpts.Skylark = &api.SkylarkOptions{Enabled: false}
+	// L4 自主进化：curated MEMORY/USER/SOUL/PROMPT + memory 工具（Hermes 风格 frozen snapshot）。
+	{
+		evoDir := projectRoot
+		if opts.Config != nil && opts.Config.Agents != nil && opts.Config.Agents.Defaults != nil {
+			if ws := strings.TrimSpace(opts.Config.Agents.Defaults.Workspace); ws != "" {
+				evoDir = ws
+			}
+		}
+		if env := opts.Env; env != nil {
+			if ws := strings.TrimSpace(env("OPENOCTA_WORKSPACE")); ws != "" {
+				evoDir = ws
+			}
+		}
+		apiOpts.Evolution = &api.EvolutionOptions{
+			Enabled: true,
+			Dir:     filepath.Join(evoDir, ".agents", "evolution"),
+		}
+	}
 	if opts.EnableSystemPrompt {
 		var base string
 		if opts.SystemPromptOverrides != "" {
@@ -322,6 +377,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	//	Endpoint:    "http://192.168.50.254:14318",
 	//}
 	applySessionHistory(&apiOpts, projectRoot, opts)
+	applyChatAgentOptimizations(&apiOpts, opts)
 	applyAPITimeouts(&apiOpts, opts)
 	runBudget := resolveAgentRunTimeout(opts)
 	rt, err := api.New(ctx, apiOpts)
@@ -384,6 +440,30 @@ type Options struct {
 	SessionHistoryTransform api.SessionHistoryTransform
 	// TokenLimit is api.Options.TokenLimit: when > 0, trims conversation history to an estimated token budget (e.g. from models.providers.*.models[].contextWindow).
 	TokenLimit int
+	// SkillFilter when non-nil restricts loaded skills to matching names/keys (empty slice = none).
+	SkillFilter *[]string
+	// McpServerFilter when non-nil restricts MCP servers by config key (empty slice = none); applied in chat handler.
+	McpServerFilter *[]string
+	// EnableWebTools when non-nil controls web_search/web_fetch/download_image registration.
+	// false = do not register web tools for this run (chat UI webSearch off).
+	// nil = register when WebToolsFromConfig allows (agent/cron paths).
+	EnableWebTools *bool
+	// DisallowedTools is passed to agentsdk-go api.Options for additional tool blacklisting.
+	DisallowedTools []string
+}
+
+func shouldRegisterWebTools(opts Options) bool {
+	if opts.EnableWebTools != nil {
+		return *opts.EnableWebTools
+	}
+	return true
+}
+
+func shouldRegisterBrowserTools(opts Options) bool {
+	if opts.Config != nil && opts.Config.Browser != nil && opts.Config.Browser.Enabled != nil {
+		return *opts.Config.Browser.Enabled
+	}
+	return true
 }
 
 func resolveApprovalQueueStorePath(s *config.SandboxConfig, env func(string) string) string {
@@ -558,6 +638,9 @@ func (r *Runtime) RunStream(ctx context.Context, req api.Request) (<-chan api.St
 
 // Close shuts down the runtime.
 func (r *Runtime) Close() error {
+	if r == nil || r.rt == nil {
+		return nil
+	}
 	return r.rt.Close()
 }
 

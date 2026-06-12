@@ -1,4 +1,5 @@
 import type { OpenClawApp } from "./app.ts";
+import type { ChatSessionResources } from "./chat/chat-resources.ts";
 import type { GatewayHelloOk } from "./gateway.ts";
 import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import {
@@ -20,7 +21,9 @@ export type ChatHost = {
   connected: boolean;
   chatMessage: string;
   chatAttachments: ChatAttachment[];
+  chatAttachmentError?: string | null;
   chatModelRef?: string | null;
+  chatResources?: ChatSessionResources;
   chatQueue: ChatQueueItem[];
   chatRunId: string | null;
   chatSending: boolean;
@@ -84,6 +87,7 @@ async function reconcileInvalidChatSessionFromList(host: OpenClawApp): Promise<b
   });
   host.chatMessage = "";
   host.chatAttachments = [];
+  host.chatAttachmentError = null;
   host.chatRunId = null;
   host.chatStream = null;
   host.chatStreamStartedAt = null;
@@ -182,6 +186,7 @@ async function sendChatMessageNow(
     message,
     opts?.attachments,
     host.chatModelRef ?? null,
+    host.chatResources,
   );
   const ok = Boolean(runId);
   if (!ok && opts?.previousDraft != null) {
@@ -263,6 +268,7 @@ export async function handleSendChat(
     host.chatMessage = "";
     // Clear attachments when sending
     host.chatAttachments = [];
+    host.chatAttachmentError = null;
   }
 
   if (isChatBusy(host)) {

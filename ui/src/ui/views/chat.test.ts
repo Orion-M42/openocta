@@ -5,7 +5,7 @@ const nativeConfirmMock = vi.hoisted(() => vi.fn());
 vi.mock("../native-dialog-bridge.ts", () => ({
   nativeConfirm: nativeConfirmMock,
 }));
-import { renderChat, type ChatProps } from "./chat.ts";
+import { renderChat, validateChatAttachmentFile, type ChatProps } from "./chat.ts";
 
 function createSessions(): SessionsListResult {
   return {
@@ -120,6 +120,22 @@ describe("chat view", () => {
     expect(container.textContent).toContain("选一个试试");
   });
 
+  it("renders scenario quick prompts when provided", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          quickPrompts: ["执行主机巡检", "查看磁盘使用率"],
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("执行主机巡检");
+    expect(container.textContent).toContain("查看磁盘使用率");
+    expect(container.textContent).not.toContain("MySQL 告警分析报告");
+  });
+
   it("disables send when there is no draft content", () => {
     const container = document.createElement("div");
     render(
@@ -161,6 +177,20 @@ describe("chat view", () => {
     expect(sendButton?.disabled).toBe(false);
   });
 
+  it("shows attachment validation errors inline", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          attachmentError: "不支持压缩包或可执行文件",
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("不支持压缩包或可执行文件");
+  });
+
   it("shows a stop button when aborting is available", () => {
     const container = document.createElement("div");
     const onAbort = vi.fn();
@@ -183,6 +213,72 @@ describe("chat view", () => {
     expect(container.textContent).not.toContain("新会话");
   });
 
+  it("does not close the resources popover when clicking inside it", () => {
+    const container = document.createElement("div");
+    const onResourcesPanelClose = vi.fn();
+    const onResourcesChange = vi.fn();
+    render(
+      renderChat(
+        createProps({
+          resourcesPanelOpen: true,
+          resources: { configured: false, skillKeys: [], mcpServers: [], webSearch: false },
+          onResourcesChange,
+          onResourcesPanelClose,
+          onResourcesPanelToggle: vi.fn(),
+          resourceSkillOptions: [
+            {
+              name: "Demo Skill",
+              description: "demo",
+              source: "workspace",
+              filePath: "/tmp/SKILL.md",
+              baseDir: "/tmp",
+              skillKey: "demo-skill",
+              always: false,
+              disabled: false,
+              blockedByAllowlist: false,
+              eligible: true,
+              requirements: { bins: [], env: [], config: [], os: [] },
+              missing: { bins: [], env: [], config: [], os: [] },
+              configChecks: [],
+              install: [],
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const checkbox = container.querySelector<HTMLInputElement>(
+      ".chat-resources-popover__item input[type='checkbox']",
+    );
+    expect(checkbox).not.toBeNull();
+    checkbox?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onResourcesPanelClose).not.toHaveBeenCalled();
+    expect(onResourcesChange).toHaveBeenCalled();
+  });
+
+  it("closes the resources popover when clicking the backdrop", () => {
+    const container = document.createElement("div");
+    const onResourcesPanelClose = vi.fn();
+    render(
+      renderChat(
+        createProps({
+          resourcesPanelOpen: true,
+          resources: { configured: false, skillKeys: [], mcpServers: [], webSearch: false },
+          onResourcesChange: vi.fn(),
+          onResourcesPanelClose,
+          onResourcesPanelToggle: vi.fn(),
+        }),
+      ),
+      container,
+    );
+
+    container.querySelector(".chat-resources-backdrop")?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    expect(onResourcesPanelClose).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a new session button when aborting is unavailable", () => {
     const container = document.createElement("div");
     const onNewSession = vi.fn();
@@ -203,5 +299,20 @@ describe("chat view", () => {
     newSessionButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onNewSession).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("停止");
+  });
+});
+
+describe("chat attachment validation", () => {
+  it("rejects archives and oversize files", () => {
+    expect(
+      validateChatAttachmentFile({ name: "demo.zip", type: "application/zip", size: 100 } as File).ok,
+    ).toBe(false);
+    expect(
+      validateChatAttachmentFile({ name: "demo.pdf", type: "application/pdf", size: 1024 * 1024 + 1 } as File)
+        .ok,
+    ).toBe(false);
+    expect(
+      validateChatAttachmentFile({ name: "notes.txt", type: "text/plain", size: 128 } as File).ok,
+    ).toBe(true);
   });
 });

@@ -38,15 +38,51 @@ type TranscriptMessage struct {
 	IsError    bool   `json:"isError,omitempty"`
 }
 
-// ContentBlock is a content block (text, image, tool_use, tool_result, etc.).
+// ContentBlock is a content block (text, image, tool_use, tool_result, a2ui, etc.).
 type ContentBlock struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Name     string `json:"name,omitempty"`
-	ID       string `json:"id,omitempty"`
-	MimeType string `json:"mimeType,omitempty"`
-	Data     string `json:"data,omitempty"`
-	IsError  bool   `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	MimeType  string          `json:"mimeType,omitempty"`
+	Filename  string          `json:"filename,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	Data      string          `json:"data,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	A2UI      json.RawMessage `json:"a2ui,omitempty"`
+}
+
+// UnmarshalJSON accepts both flat image blocks (mimeType/data) and nested source blocks
+// ({ source: { type, media_type, data } }) written by chat tool attachments.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type contentBlockAlias ContentBlock
+	var aux struct {
+		contentBlockAlias
+		Source json.RawMessage `json:"source"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*b = ContentBlock(aux.contentBlockAlias)
+	if len(aux.Source) == 0 {
+		return nil
+	}
+	var src struct {
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}
+	if json.Unmarshal(aux.Source, &src) != nil {
+		return nil
+	}
+	if b.MimeType == "" && src.MediaType != "" {
+		b.MimeType = src.MediaType
+	}
+	if b.Data == "" && src.Data != "" {
+		b.Data = src.Data
+	}
+	return nil
 }
 
 // Usage holds token usage.

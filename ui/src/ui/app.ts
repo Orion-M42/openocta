@@ -5,14 +5,23 @@ import type { AppViewState } from "./app-view-state.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
+import { defaultChatSessionResources } from "./chat/chat-resources.ts";
 import type { SkillMessage } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import {
-  getProductTourSteps,
-  markProductTourCompleted,
-  shouldShowProductTour,
+  resolveSetupWizardVersion,
+  shouldShowSetupWizard,
+  syncSetupWizardCompletionCache,
+  createEmptySetupWizardSession,
   type Tab,
 } from "./navigation.ts";
+import {
+  initSetupWizardSession,
+  persistSetupWizardCompletion,
+  persistSetupWizardSkipped,
+  flushSetupWizardSkipToConfig,
+  refreshSetupWizardFromConfig,
+} from "./app-setup-wizard.ts";
 import type { ResolvedTheme, ThemeMode } from "./theme.ts";
 import type {
   AgentsListResult,
@@ -133,9 +142,43 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() password = "";
   @state() tab: Tab = "message";
   @state() onboarding = resolveOnboardingMode();
-  @state() productTourActive = false;
-  @state() productTourStepIndex = 0;
-  private productTourStartTimer: number | null = null;
+  @state() setupWizardActive = false;
+  @state() setupWizardStepIndex = 0;
+  @state() setupWizardSession = createEmptySetupWizardSession();
+  @state() setupWizardResourceTab: import("./setup-wizard.ts").SetupWizardResourceTab = "skills";
+  @state() setupWizardModelSearchQuery = "";
+  @state() setupWizardModelCategory: import("./views/model-library.ts").ModelLibraryCategory = "__all__";
+  @state() setupWizardEnabledProviders = new Set<string>();
+  @state() setupWizardResourcesLoading = false;
+  @state() setupWizardResourcesError: string | null = null;
+  @state() setupWizardSkillItems: import("./controllers/remote-market.ts").SkillListItem[] = [];
+  @state() setupWizardSkillQuery = "";
+  @state() setupWizardSkillInstallingFolder: string | null = null;
+  @state() setupWizardEmployeeItems: import("./controllers/remote-market.ts").EmployeeListItem[] = [];
+  @state() setupWizardEmployeeQuery = "";
+  @state() setupWizardEmployeeInstallingId: string | null = null;
+  @state() setupWizardMcpItems: import("./controllers/remote-market.ts").McpListItem[] = [];
+  @state() setupWizardMcpQuery = "";
+  @state() setupWizardMcpInstallingId: string | null = null;
+  @state() setupWizardBrowserChromiumSelected = true;
+  @state() setupWizardBrowserReady = false;
+  @state() setupWizardBrowserInstalling = false;
+  @state() setupWizardBrowserInstallError: string | null = null;
+  @state() setupWizardBrowserInstallProgress: import("./controllers/browser-install.ts").BrowserInstallProgress | null =
+    null;
+  setupWizardBrowserPollTimer: number | null = null;
+  @state() setupWizardSelectedScenarioId: string | null = null;
+  @state() setupWizardScenarioMenuOpenId: string | null = null;
+  @state() setupWizardScenarioDetailId: string | null = null;
+  @state() setupWizardScenarioEnvPanelOpen = false;
+  @state() setupWizardSelectedChannelId: string | null = null;
+  @state() setupWizardScenarioRunning = false;
+  @state() setupWizardScenarioRunCompleted = false;
+  setupWizardScenarioCancelRequested = false;
+  @state() setupWizardWelcomeVisible = false;
+  @state() setupWizardScenarioProgress: import("./setup-wizard.ts").SetupWizardScenarioRunRecord | null = null;
+  @state() setupWizardScenarioEnvPrompt: import("./setup-wizard.ts").SetupWizardScenarioEnvPrompt | null = null;
+  private setupWizardStartTimer: number | null = null;
   @state() isDesktopShell = isDesktopShell();
   @state() isWindowsDesktop = false;
   @state() isWindowMaximised = false;
@@ -161,13 +204,29 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() chatToolMessages: unknown[] = [];
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
+  @state() chatA2UIMessages: unknown[] = [];
+  @state() chatFilePreview: import("./chat/file-blocks.ts").FilePreviewRequest | null = null;
   @state() chatRunId: string | null = null;
+  @state() chatTerminalRunIds: string[] = [];
+  @state() chatErrorRunId: string | null = null;
+  @state() chatRunPhase: "idle" | "thinking" | "tool" | "streaming" = "idle";
   @state() compactionStatus: CompactionStatus | null = null;
   @state() chatAvatarUrl: string | null = null;
   @state() chatThinkingLevel: string | null = null;
   @state() chatModelRef: string | null = null;
+  @state() chatResources = defaultChatSessionResources();
+  @state() chatResourcesPanelOpen = false;
+  @state() chatResourcesTab: "skills" | "mcp" = "skills";
+  @state() chatResourcesSkillSearch = "";
+  @state() chatResourcesMcpSearch = "";
+  @state() chatExtractSkillLoading = false;
+  @state() chatExtractSkillError: string | null = null;
+  @state() chatExtractSkillMarkdown: string | null = null;
+  @state() chatExtractSkillFilename: string | null = null;
+  @state() chatExtractSkillOpen = false;
   @state() chatQueue: ChatQueueItem[] = [];
   @state() chatAttachments: ChatAttachment[] = [];
+  @state() chatAttachmentError: string | null = null;
   // Sidebar state for tool output viewing
   @state() sidebarOpen = false;
   @state() sidebarContent: string | null = null;
@@ -374,46 +433,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   })();
-  @state() usageSelectedSessions: string[] = [];
-  @state() usageSelectedDays: string[] = [];
-  @state() usageSelectedHours: number[] = [];
   @state() usageChartMode: "tokens" | "cost" = "tokens";
   @state() usageDailyChartMode: "total" | "by-type" = "by-type";
-  @state() usageTimeSeriesMode: "cumulative" | "per-turn" = "per-turn";
-  @state() usageTimeSeriesBreakdownMode: "total" | "by-type" = "by-type";
-  @state() usageTimeSeries: import("./types.js").SessionUsageTimeSeries | null = null;
-  @state() usageTimeSeriesLoading = false;
-  @state() usageSessionLogs: import("./views/usage.js").SessionLogEntry[] | null = null;
-  @state() usageSessionLogsLoading = false;
-  @state() usageSessionLogsExpanded = false;
-  // Applied query (used to filter the already-loaded sessions list client-side).
-  @state() usageQuery = "";
-  // Draft query text (updates immediately as the user types; applied via debounce or "Search").
-  @state() usageQueryDraft = "";
-  @state() usageSessionSort: "tokens" | "cost" | "recent" | "messages" | "errors" = "recent";
-  @state() usageSessionSortDir: "desc" | "asc" = "desc";
-  @state() usageRecentSessions: string[] = [];
   @state() usageTimeZone: "local" | "utc" = "local";
-  @state() usageContextExpanded = false;
-  @state() usageHeaderPinned = false;
-  @state() usageSessionsTab: "all" | "recent" = "all";
-  @state() usageVisibleColumns: string[] = [
-    "channel",
-    "agent",
-    "provider",
-    "model",
-    "messages",
-    "tools",
-    "errors",
-    "duration",
-  ];
-  @state() usageLogFilterRoles: import("./views/usage.js").SessionLogRole[] = [];
-  @state() usageLogFilterTools: string[] = [];
-  @state() usageLogFilterHasTools = false;
-  @state() usageLogFilterQuery = "";
-
-  // Non-reactive (don’t trigger renders just for timer bookkeeping).
-  usageQueryDebounceTimer: number | null = null;
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];
@@ -573,6 +595,7 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() tutorialsLoading = false;
   @state() tutorialsError: string | null = null;
   @state() tutorialCategories: import("./controllers/remote-market.ts").EduCategory[] = [];
+  @state() tutorialsActiveTab: import("./views/tutorials.ts").TutorialTab = "video";
   @state() tutorialsQuery = "";
   @state() tutorialsSelectedCategoryId: number | null = null;
   @state() tutorialsPlayingLink: string | null = null;
@@ -617,7 +640,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   private chatUserNearBottom = true;
   @state() chatNewMessagesBelow = false;
   /** true = only assistant/user in thread; false = show tool rows (I/O still collapsible in UI). */
-  @state() chatConversationOnly = true;
+  @state() chatBrowserPreviewOpen = false;
+  @state() chatBrowserPreviewAutoOpened = false;
+  @state() chatConversationOnly = false;
   private nodesPollInterval: number | null = null;
   private logsPollInterval: number | null = null;
   private debugPollInterval: number | null = null;
@@ -666,9 +691,9 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   }
 
   disconnectedCallback() {
-    if (this.productTourStartTimer != null) {
-      window.clearTimeout(this.productTourStartTimer);
-      this.productTourStartTimer = null;
+    if (this.setupWizardStartTimer != null) {
+      window.clearTimeout(this.setupWizardStartTimer);
+      this.setupWizardStartTimer = null;
     }
     unregisterNativeDialogInvoker(this);
     document.removeEventListener("keydown", this.sessionOverflowEscapeHandler);
@@ -679,6 +704,25 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
 
   protected updated(changed: Map<PropertyKey, unknown>) {
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);
+    if (
+      this.setupWizardActive &&
+      (changed.has("configForm") || changed.has("configSnapshot"))
+    ) {
+      refreshSetupWizardFromConfig(this as unknown as AppViewState);
+    }
+    if (
+      !this.setupWizardActive &&
+      !this.onboarding &&
+      (changed.has("configSnapshot") ||
+        changed.has("connected") ||
+        changed.has("configSchemaVersion") ||
+        changed.has("hello"))
+    ) {
+      if (this.connected && this.configSnapshot) {
+        void flushSetupWizardSkipToConfig(this as unknown as AppViewState);
+      }
+      this.maybeStartSetupWizard();
+    }
   }
 
   connect() {
@@ -849,43 +893,67 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
     this.approvalBannerVisible = false;
   }
 
-  maybeStartProductTour() {
-    if (this.onboarding || this.productTourActive) {
+  maybeStartSetupWizard() {
+    if (this.onboarding || this.setupWizardActive) {
       return;
     }
-    if (!shouldShowProductTour()) {
+    const configLoaded = this.configSnapshot != null || this.configForm != null;
+    if (this.connected && !configLoaded && (this.configLoading || !this.configSnapshot)) {
       return;
     }
-    const steps = getProductTourSteps();
-    if (steps.length === 0) {
+    const config = configLoaded
+      ? ((this.configForm ?? this.configSnapshot?.config) as Record<string, unknown> | null)
+      : undefined;
+    if (configLoaded) {
+      syncSetupWizardCompletionCache(config);
+    }
+    const version = resolveSetupWizardVersion(this.configSchemaVersion, this.hello);
+    if (!version) {
       return;
     }
-    this.productTourActive = true;
-    this.productTourStepIndex = 0;
-    this.setTab(steps[0]!.tab);
+    if (!shouldShowSetupWizard(version, config)) {
+      return;
+    }
+    initSetupWizardSession(this as unknown as AppViewState);
+    this.setupWizardActive = true;
   }
 
-  productTourNext() {
-    const steps = getProductTourSteps();
-    if (!this.productTourActive || steps.length === 0) {
+  openSetupWizard() {
+    if (this.setupWizardActive) {
       return;
     }
-    if (this.productTourStepIndex >= steps.length - 1) {
-      this.finishProductTour();
+    this.setupWizardWelcomeVisible = false;
+    initSetupWizardSession(this as unknown as AppViewState);
+    this.setupWizardStepIndex = 0;
+    this.setupWizardActive = true;
+  }
+
+  async finishSetupWizard() {
+    await persistSetupWizardCompletion(this as unknown as AppViewState);
+    this.closeSetupWizardWithWelcome();
+  }
+
+  async skipAllSetupWizard() {
+    if (this.setupWizardScenarioRunning) {
       return;
     }
-    this.productTourStepIndex += 1;
-    this.setTab(steps[this.productTourStepIndex]!.tab);
+    await persistSetupWizardSkipped(this as unknown as AppViewState);
+    this.closeSetupWizardWithWelcome();
   }
 
-  productTourSkip() {
-    this.finishProductTour();
+  private closeSetupWizardWithWelcome() {
+    this.setupWizardActive = false;
+    this.setupWizardStepIndex = 0;
+    this.setupWizardScenarioProgress = null;
+    this.setupWizardScenarioRunning = false;
+    this.setupWizardScenarioRunCompleted = false;
+    this.setupWizardScenarioCancelRequested = false;
+    this.setupWizardScenarioEnvPrompt = null;
+    this.setupWizardWelcomeVisible = true;
   }
 
-  private finishProductTour() {
-    markProductTourCompleted();
-    this.productTourActive = false;
-    this.productTourStepIndex = 0;
+  dismissSetupWizardWelcome() {
+    this.setupWizardWelcomeVisible = false;
   }
 
   handleGatewayUrlConfirm() {

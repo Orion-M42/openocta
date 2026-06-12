@@ -19,7 +19,7 @@ function weworkConfiguredFromForm(configForm: Record<string, unknown> | null): b
   return botId !== "" && botSecret !== "";
 }
 
-function renderWeWorkQrModal(props: ChannelsProps) {
+export function renderWeWorkQrModal(props: ChannelsProps) {
   if (!props.weworkQrModalOpen) {
     return nothing;
   }

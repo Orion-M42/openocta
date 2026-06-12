@@ -133,11 +133,12 @@ export function cronFormFromJob(job: CronJob, prev: CronFormState): CronFormStat
 
   // Schedule
   next.scheduleKind = scheduleKind;
-  if (scheduleKind === "at") {
-    const atMs = Date.parse(job.schedule?.at ?? "");
+  const schedule = job.schedule;
+  if (scheduleKind === "at" && schedule?.kind === "at") {
+    const atMs = Date.parse(schedule.at ?? "");
     next.scheduleAt = Number.isFinite(atMs) ? toLocalDateTimeInputValue(atMs) : "";
-  } else if (scheduleKind === "every") {
-    const everyMs = Number(job.schedule?.everyMs ?? 0);
+  } else if (scheduleKind === "every" && schedule?.kind === "every") {
+    const everyMs = Number(schedule.everyMs ?? 0);
     const minute = 60_000;
     const hour = 3_600_000;
     const day = 86_400_000;
@@ -151,9 +152,9 @@ export function cronFormFromJob(job: CronJob, prev: CronFormState): CronFormStat
       next.everyUnit = "minutes";
       next.everyAmount = String(Math.max(1, Math.round((everyMs || minute) / minute)));
     }
-  } else {
-    next.cronExpr = String(job.schedule?.expr ?? "").trim() || prev.cronExpr;
-    next.cronTz = String((job.schedule as any)?.tz ?? "").trim();
+  } else if (schedule?.kind === "cron") {
+    next.cronExpr = String(schedule.expr ?? "").trim() || prev.cronExpr;
+    next.cronTz = String(schedule.tz ?? "").trim();
   }
 
   // Payload

@@ -139,7 +139,7 @@ export async function openExternalUrl(
   if (isDesktopShell()) {
     // Desktop shell: 使用系统浏览器打开，避免在当前 webview 中打开导致无法返回
     if (typeof window !== "undefined" && (window as { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime?.BrowserOpenURL) {
-      (window as { runtime: { BrowserOpenURL: (url: string) => void } }).runtime.BrowserOpenURL(href);
+      (window as unknown as { runtime: { BrowserOpenURL: (url: string) => void } }).runtime.BrowserOpenURL(href);
       return;
     }
     // 如果 runtime 不可用，使用新窗口打开

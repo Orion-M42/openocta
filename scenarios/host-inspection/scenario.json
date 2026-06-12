@@ -1,0 +1,43 @@
+{
+  "id": "host-inspection",
+  "name": "主机巡检场景",
+  "summary": "定期巡检主机 CPU、内存、磁盘与服务状态。",
+  "skills": [
+    {
+      "id": "ansible-ops",
+      "name": "AnsibleOps",
+      "description": "Ansible 运维专家：自动化部署、配置管理与故障排查",
+      "downloadUrl": "https://openocta.com/api/v1/skills/ansible-ops/download",
+      "category": "运维"
+    }
+  ],
+  "mcps": [
+    {
+      "id": "26",
+      "name": "Prometheus-MCP",
+      "description": "Prometheus 监控数据查询与告警管理 MCP",
+      "downloadUrl": "https://openocta.com/api/v1/mcps/26/download",
+      "category": "运维"
+    }
+  ],
+  "employees": [],
+  "env": [
+    { "name": "SSH_HOST", "description": "默认 SSH 巡检目标主机", "required": true, "example": "192.168.1.10" },
+    { "name": "SSH_USER", "description": "SSH 登录用户名", "required": true, "example": "ops" }
+  ],
+  "bundledTools": [
+    {
+      "name": "openssh-clients",
+      "description": "SSH 客户端离线 deb 包占位",
+      "platform": "linux-deb",
+      "relativePath": "bundled/.gitkeep"
+    }
+  ],
+  "quickPrompts": [
+    "对 SSH_HOST 执行主机巡检并输出 Markdown 报告",
+    "检查目标主机 CPU、内存、磁盘使用情况",
+    "查询 Prometheus 最近 15 分钟的主机告警",
+    "帮我梳理主机异常排查思路，并给出优先级",
+    "你能告诉我你有哪些技能吗？"
+  ]
+}

@@ -327,12 +327,34 @@
 }
 
 .session-item__text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
   line-height: 16px;
+  min-width: 0;
+}
+
+.session-item__pin {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--accent, #6366f1);
+  opacity: 0.9;
+}
+
+.session-item__pin svg {
+  width: 14px;
+  height: 14px;
+}
+
+.session-item--pinned .session-item__text {
+  font-weight: 600;
 }
 
 .session-item__sub {
@@ -1954,69 +1976,8 @@ button.nav-item {
   line-height: 24px;
 }
 
-/* First-run product tour */
-.shell--product-tour .topbar {
-  position: relative;
-  z-index: 201;
+.shell--setup-wizard {
+  overflow: hidden;
 }
 
-.top-tab--product-tour {
-  position: relative;
-  z-index: 202;
-  color: var(--text-primary);
-  font-weight: 600;
-  box-shadow: 0 0 0 2px var(--accent, #2563eb);
-  border-radius: var(--radius-sm, 6px);
-}
-
-.product-tour {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  pointer-events: none;
-}
-
-.product-tour__backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.48);
-  pointer-events: auto;
-}
-
-.product-tour__card {
-  position: absolute;
-  left: 50%;
-  bottom: max(24px, env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  width: min(440px, calc(100vw - 32px));
-  padding: 20px 22px;
-  pointer-events: auto;
-  box-shadow: var(--shadow-lg, 0 20px 40px rgba(15, 23, 42, 0.18));
-}
-
-.product-tour__progress {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.product-tour__title {
-  margin: 0 0 10px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.product-tour__body {
-  margin: 0 0 18px;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--text-regular);
-}
-
-.product-tour__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
+/* Legacy product tour styles kept for reference; wizard uses .setup-wizard in setup-wizard.css */

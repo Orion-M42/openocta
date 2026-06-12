@@ -13,6 +13,8 @@ dist-mac/
 ./src/.claude/
 ./src/.idea/
 ./src/.claude-trace/
+# Local dev chromium symlinks (must not point at system Google Chrome)
+./src/chromium/
 ./.claude-trace/
 ./.idea/
 ./openocta

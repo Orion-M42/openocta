@@ -41,13 +41,43 @@ export function stripEnvelope(text: string): string {
   return text.slice(match[0].length);
 }
 
+function isPlaceholderAssistantText(text: string): boolean {
+  return text.trim() === ".";
+}
+
+function messageHasToolCalls(message: Record<string, unknown>): boolean {
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some((p) => {
+    const item = p as Record<string, unknown>;
+    const kind = (typeof item.type === "string" ? item.type : "").toLowerCase();
+    return ["toolcall", "tool_call", "tooluse", "tool_use"].includes(kind);
+  });
+}
+
+function stripPlaceholderAssistantText(
+  role: string,
+  message: Record<string, unknown>,
+  text: string | null,
+): string | null {
+  if (!text || role !== "assistant") {
+    return text;
+  }
+  if (isPlaceholderAssistantText(text) && messageHasToolCalls(message)) {
+    return null;
+  }
+  return text;
+}
+
 export function extractText(message: unknown): string | null {
   const m = message as Record<string, unknown>;
   const role = typeof m.role === "string" ? m.role : "";
   const content = m.content;
   if (typeof content === "string") {
     const processed = role === "assistant" ? stripThinkingTags(content) : stripEnvelope(content);
-    return processed;
+    return stripPlaceholderAssistantText(role, m, processed);
   }
   if (Array.isArray(content)) {
     const parts = content
@@ -62,12 +92,12 @@ export function extractText(message: unknown): string | null {
     if (parts.length > 0) {
       const joined = parts.join("\n");
       const processed = role === "assistant" ? stripThinkingTags(joined) : stripEnvelope(joined);
-      return processed;
+      return stripPlaceholderAssistantText(role, m, processed);
     }
   }
   if (typeof m.text === "string") {
     const processed = role === "assistant" ? stripThinkingTags(m.text) : stripEnvelope(m.text);
-    return processed;
+    return stripPlaceholderAssistantText(role, m, processed);
   }
   return null;
 }

@@ -94,6 +94,7 @@ export async function loadSessions(
     includeGlobal?: boolean;
     includeUnknown?: boolean;
     includeLastMessage?: boolean;
+    includeDerivedTitles?: boolean;
   },
 ) {
   if (!state.client || !state.connected) {
@@ -122,6 +123,9 @@ export async function loadSessions(
     if (overrides?.includeLastMessage) {
       params.includeLastMessage = true;
     }
+    if (overrides?.includeDerivedTitles ?? overrides?.includeLastMessage) {
+      params.includeDerivedTitles = true;
+    }
     const res = await state.client.request<SessionsListResult | undefined>("sessions.list", params);
     if (res) {
       state.sessionsResult = res;
@@ -141,6 +145,7 @@ export async function patchSession(
     thinkingLevel?: string | null;
     verboseLevel?: string | null;
     reasoningLevel?: string | null;
+    pinned?: boolean | null;
   },
 ) {
   if (!state.client || !state.connected) {
@@ -158,6 +163,9 @@ export async function patchSession(
   }
   if ("reasoningLevel" in patch) {
     params.reasoningLevel = patch.reasoningLevel;
+  }
+  if ("pinned" in patch) {
+    params.pinned = patch.pinned;
   }
   try {
     await state.client.request("sessions.patch", params);

@@ -155,39 +155,91 @@ func resolveFromLegacy(cfg *config.SecurityConfig) *ResolvedCommandPolicy {
 }
 
 // EvaluateCommand returns "deny" | "ask" | "allow" for the given command.
-// Order: deny rules first, then allow, then ask; else defaultPolicy.
+// Compound commands (&&, ||, ;) are evaluated per segment; the strictest action wins.
 func (r *ResolvedCommandPolicy) EvaluateCommand(command string) string {
+	action, _ := r.EvaluateCommandAccess(command)
+	return action
+}
+
+// EvaluateCommandAccess returns the policy action and whether an explicit rule matched
+// (as opposed to falling back to defaultPolicy).
+func (r *ResolvedCommandPolicy) EvaluateCommandAccess(command string) (action string, explicitRule bool) {
 	if r == nil || !r.Enabled {
-		return "allow"
+		return "allow", false
 	}
+	segments := splitShellCommandSegments(command)
+	if len(segments) == 0 {
+		return "deny", false
+	}
+	worst := "allow"
+	anyExplicit := false
+	for _, segment := range segments {
+		segAction, explicit := r.evaluateSingleCommandAccess(segment)
+		if segAction == "deny" {
+			return "deny", explicit
+		}
+		if segAction == "ask" {
+			worst = "ask"
+			if explicit {
+				anyExplicit = true
+			}
+			continue
+		}
+		if worst != "ask" {
+			worst = "allow"
+		}
+	}
+	return worst, anyExplicit
+}
+
+func (r *ResolvedCommandPolicy) evaluateSingleCommandAccess(command string) (action string, explicitRule bool) {
 	cmd := strings.TrimSpace(command)
 	if cmd == "" {
-		return "deny"
+		return "deny", false
 	}
 	lower := strings.ToLower(cmd)
 	base := ""
 	if parts := strings.Fields(cmd); len(parts) > 0 {
 		base = filepath.Base(parts[0])
 	}
-	// Check deny
 	for _, rule := range r.DenyRules {
 		if matchRule(cmd, lower, base, rule) {
-			return "deny"
+			return "deny", true
 		}
 	}
-	// Check allow
 	for _, rule := range r.AllowRules {
 		if matchRule(cmd, lower, base, rule) {
-			return "allow"
+			return "allow", true
 		}
 	}
-	// Check ask
 	for _, rule := range r.AskRules {
 		if matchRule(cmd, lower, base, rule) {
-			return "ask"
+			return "ask", true
 		}
 	}
-	return r.DefaultPolicy
+	return r.DefaultPolicy, false
+}
+
+func splitShellCommandSegments(command string) []string {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(cmd, func(r rune) bool {
+		return r == '&' || r == '|' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		segment := strings.TrimSpace(part)
+		if segment == "" {
+			continue
+		}
+		out = append(out, segment)
+	}
+	if len(out) == 0 {
+		return []string{cmd}
+	}
+	return out
 }
 
 func matchRule(cmd, lower, base string, rule CommandRule) bool {
@@ -201,6 +253,53 @@ func matchRule(cmd, lower, base string, rule CommandRule) bool {
 	default:
 		return strings.EqualFold(base, pat) || strings.HasPrefix(lower, pat+" ")
 	}
+}
+
+// readOnlyShellCommands are safe diagnostics that should not block on approval queues.
+var readOnlyShellCommands = map[string]struct{}{
+	"ls": {}, "pwd": {}, "echo": {}, "printf": {}, "cat": {}, "wc": {},
+	"head": {}, "tail": {}, "stat": {}, "file": {}, "du": {}, "df": {},
+	"hostname": {}, "uname": {}, "whoami": {}, "id": {}, "date": {}, "env": {},
+	"printenv": {}, "which": {}, "type": {}, "true": {}, "false": {},
+}
+
+// benignWriteShellCommands are non-interactive workspace mutations that should not
+// stall on approval queues (mkdir -p, touch, copy/move within sandbox, etc.).
+var benignWriteShellCommands = map[string]struct{}{
+	"mkdir": {}, "touch": {}, "cp": {}, "mv": {}, "ln": {}, "rmdir": {},
+	"install": {}, "truncate": {}, "mktemp": {},
+}
+
+func isReadOnlyShellSegment(segment string) bool {
+	cmd := strings.TrimSpace(segment)
+	if cmd == "" {
+		return false
+	}
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(parts[0]))
+	_, ok := readOnlyShellCommands[base]
+	return ok
+}
+
+func isBenignWriteShellSegment(segment string) bool {
+	cmd := strings.TrimSpace(segment)
+	if cmd == "" {
+		return false
+	}
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(parts[0]))
+	_, ok := benignWriteShellCommands[base]
+	return ok
+}
+
+func isAutoAllowShellSegment(segment string) bool {
+	return isReadOnlyShellSegment(segment) || isBenignWriteShellSegment(segment)
 }
 
 // ToLegacyValidator converts to SandboxValidatorConfig for ValidateCommandWithConfig.

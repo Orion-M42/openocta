@@ -5,14 +5,22 @@ import type { GatewayEventFrame, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
 import type { AgentsListResult, PresenceEntry, HealthSnapshot, StatusSummary } from "./types.ts";
+import type { ChatAttachment, ChatQueueItem } from "./ui-types.ts";
 import { CHAT_SESSIONS_ACTIVE_MINUTES, flushChatQueueForEvent } from "./app-chat.ts";
+import { scheduleChatScroll } from "./app-scroll.ts";
+import { defaultChatSessionResources, resetChatResourcesPanelUi } from "./chat/chat-resources.ts";
 import {
   applySettings,
   loadCron,
   refreshActiveTab,
   setLastActiveSessionKey,
 } from "./app-settings.ts";
-import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
+import {
+  closeAutoChatBrowserPreview,
+  handleAgentEvent,
+  resetToolStream,
+  type AgentEventPayload,
+} from "./app-tool-stream.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
@@ -58,6 +66,11 @@ type GatewayHost = {
   assistantAvatar: string | null;
   assistantAgentId: string | null;
   sessionKey: string;
+  chatMessage: string;
+  chatAttachments: ChatAttachment[];
+  chatAttachmentError: string | null;
+  chatModelRef: string | null;
+  chatQueue: ChatQueueItem[];
   chatRunId: string | null;
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
@@ -121,8 +134,17 @@ function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnaps
     // 避免切换后仍显示 “...” 或把旧 runId 绑定到新会话上。
     host.chatMessage = "";
     host.chatAttachments = [];
+    host.chatAttachmentError = null;
     host.chatModelRef = null;
+    (host as unknown as { chatResources: ReturnType<typeof defaultChatSessionResources> }).chatResources =
+      defaultChatSessionResources();
+    resetChatResourcesPanelUi(
+      host as unknown as Parameters<typeof resetChatResourcesPanelUi>[0],
+    );
     host.chatRunId = null;
+    (host as unknown as { chatTerminalRunIds: string[] }).chatTerminalRunIds = [];
+    (host as unknown as { chatErrorRunId: string | null }).chatErrorRunId = null;
+    (host as unknown as { chatRunPhase: "idle" | "thinking" | "tool" | "streaming" }).chatRunPhase = "idle";
     (host as unknown as { chatStream: string | null }).chatStream = null;
     (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
     host.chatQueue = [];
@@ -155,6 +177,10 @@ export function connectGateway(host: GatewayHost) {
       // Reset orphaned chat run state from before disconnect.
       // Any in-flight run's final event was lost during the disconnect window.
       host.chatRunId = null;
+      (host as unknown as { chatTerminalRunIds: string[] }).chatTerminalRunIds = [];
+      (host as unknown as { chatErrorRunId: string | null }).chatErrorRunId = null;
+      (host as unknown as { chatRunPhase: "idle" | "thinking" | "tool" | "streaming" }).chatRunPhase =
+        "idle";
       (host as unknown as { chatStream: string | null }).chatStream = null;
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
@@ -223,9 +249,11 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       host as unknown as Parameters<typeof handleAgentEvent>[0],
       agentPayload,
     );
-    // 工具开始执行时清掉上一轮残留的流式文本，避免旧内容一直显示
+    // 工具开始执行时清掉上一轮残留的流式文本，保持运行中状态以显示加载指示
     if (agentPayload?.stream === "tool" && agentPayload?.data?.phase === "start") {
-      (host as unknown as { chatStream: string | null }).chatStream = null;
+      (host as unknown as { chatStream: string | null }).chatStream = "";
+      (host as unknown as { chatRunPhase: "idle" | "thinking" | "tool" | "streaming" }).chatRunPhase =
+        "tool";
     }
     return;
   }
@@ -239,13 +267,20 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       );
     }
     const state = handleChatEvent(host as unknown as OpenClawApp, payload);
-    if (state === "final" || state === "error" || state === "aborted") {
+    if (state === "delta") {
+      scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0], true);
+    }
+    if (state === "a2ui" || state === "turn") {
+      scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0], true);
+    }
+    if (state === "final" || state === "complete" || state === "error" || state === "aborted") {
+      closeAutoChatBrowserPreview(host as unknown as Parameters<typeof closeAutoChatBrowserPreview>[0]);
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
       const runId = payload?.runId;
       if (runId && host.refreshSessionsAfterChat.has(runId)) {
         host.refreshSessionsAfterChat.delete(runId);
-        if (state === "final") {
+        if (state === "final" || state === "complete") {
           void loadSessions(host as unknown as OpenClawApp, {
             activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
             includeLastMessage: true,
@@ -253,8 +288,18 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         }
       }
     }
-    if (state === "final" || state === "aborted") {
-      void loadChatHistory(host as unknown as OpenClawApp);
+    const app = host as unknown as OpenClawApp;
+    const errorRunId = app.chatErrorRunId ?? null;
+    const payloadRunId = typeof payload?.runId === "string" ? payload.runId.trim() : "";
+    const skipHistoryReload =
+      state === "complete" && Boolean(errorRunId && payloadRunId && errorRunId === payloadRunId);
+    if (state === "error") {
+      void loadChatHistory(app);
+    } else if ((state === "final" || state === "complete" || state === "aborted") && !skipHistoryReload) {
+      void loadChatHistory(app);
+    }
+    if (state === "complete" && skipHistoryReload) {
+      app.chatErrorRunId = null;
     }
     return;
   }

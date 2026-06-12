@@ -337,11 +337,21 @@ type ShellEnvConfig struct {
 
 // WizardConfig holds wizard run state.
 type WizardConfig struct {
-	LastRunAt      string `json:"lastRunAt,omitempty"`
-	LastRunVersion string `json:"lastRunVersion,omitempty"`
-	LastRunCommit  string `json:"lastRunCommit,omitempty"`
-	LastRunCommand string `json:"lastRunCommand,omitempty"`
-	LastRunMode    string `json:"lastRunMode,omitempty"` // "local" | "remote"
+	LastRunAt      string                  `json:"lastRunAt,omitempty"`
+	LastRunVersion string                  `json:"lastRunVersion,omitempty"`
+	LastRunCommit  string                  `json:"lastRunCommit,omitempty"`
+	LastRunCommand string                  `json:"lastRunCommand,omitempty"`
+	LastRunMode    string                  `json:"lastRunMode,omitempty"` // "local" | "remote"
+	Setup          *SetupWizardStateConfig `json:"setup,omitempty"`
+}
+
+// SetupWizardStateConfig records UI setup wizard completion (version, status, time).
+type SetupWizardStateConfig struct {
+	Version      string   `json:"version,omitempty"`
+	Status       string   `json:"status,omitempty"` // "completed" | "skipped" | "in_progress"
+	CompletedAt  string   `json:"completedAt,omitempty"`
+	SkippedSteps []string `json:"skippedSteps,omitempty"`
+	ScenarioID   string   `json:"scenarioId,omitempty"`
 }
 
 // SkillsConfig holds skills settings.
@@ -1180,7 +1190,7 @@ type ToolsWebConfig struct {
 // ToolsWebSearchConfig holds web search configuration.
 type ToolsWebSearchConfig struct {
 	Enabled         *bool                           `json:"enabled,omitempty"`
-	Provider        *string                         `json:"provider,omitempty"` // "brave" | "perplexity"
+	Provider        *string                         `json:"provider,omitempty"` // "bing" | "brave" | "perplexity"
 	APIKey          *string                         `json:"apiKey,omitempty"`
 	MaxResults      *int                            `json:"maxResults,omitempty"`
 	TimeoutSeconds  *int                            `json:"timeoutSeconds,omitempty"`

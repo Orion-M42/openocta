@@ -1,0 +1,33 @@
+{
+  "id": "browser-office",
+  "name": "浏览器操作办公场景",
+  "summary": "网页填报、表单抓取与办公自动化。",
+  "skills": [
+    {
+      "id": "browserless-agent",
+      "name": "browserless-agent",
+      "description": "Headless 浏览器网页自动化技能",
+      "downloadUrl": "https://openocta.com/api/v1/skills/browserless-agent/download",
+      "category": "自动化"
+    }
+  ],
+  "mcps": [
+    {
+      "id": "27",
+      "name": "playwright-MCP",
+      "description": "Playwright 浏览器自动化 MCP",
+      "downloadUrl": "https://openocta.com/api/v1/mcps/27/download",
+      "category": "自动化"
+    }
+  ],
+  "employees": [],
+  "env": [
+    {
+      "name": "HTTP_PROXY",
+      "description": "可选 HTTP 代理",
+      "required": false,
+      "example": "http://127.0.0.1:7890"
+    }
+  ],
+  "bundledTools": []
+}

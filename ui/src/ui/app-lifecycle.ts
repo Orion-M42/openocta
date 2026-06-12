@@ -58,22 +58,22 @@ export function handleConnected(host: LifecycleHost) {
   }
 }
 
-type ProductTourHost = LifecycleHost & {
+type SetupWizardHost = LifecycleHost & {
   onboarding?: boolean;
-  productTourActive: boolean;
-  productTourStartTimer: number | null;
-  maybeStartProductTour: () => void;
+  setupWizardActive: boolean;
+  setupWizardStartTimer: number | null;
+  maybeStartSetupWizard: () => void;
 };
 
 export function handleFirstUpdated(host: LifecycleHost) {
   observeTopbar(host as unknown as Parameters<typeof observeTopbar>[0]);
-  const tourHost = host as unknown as ProductTourHost;
-  if (tourHost.productTourStartTimer != null) {
-    window.clearTimeout(tourHost.productTourStartTimer);
+  const wizardHost = host as unknown as SetupWizardHost;
+  if (wizardHost.setupWizardStartTimer != null) {
+    window.clearTimeout(wizardHost.setupWizardStartTimer);
   }
-  tourHost.productTourStartTimer = window.setTimeout(() => {
-    tourHost.productTourStartTimer = null;
-    tourHost.maybeStartProductTour();
+  wizardHost.setupWizardStartTimer = window.setTimeout(() => {
+    wizardHost.setupWizardStartTimer = null;
+    wizardHost.maybeStartSetupWizard();
   }, 400);
 }
 

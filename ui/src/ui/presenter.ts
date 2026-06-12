@@ -22,12 +22,63 @@ export function formatNextRun(ms?: number | null) {
 }
 
 export function formatSessionTokens(row: GatewaySessionRow) {
-  if (row.totalTokens == null) {
-    return "n/a";
+  const input = row.inputTokens ?? 0;
+  const output = row.outputTokens ?? 0;
+  const total = row.totalTokens ?? input + output;
+  if (total <= 0 && input <= 0 && output <= 0) {
+    return "—";
   }
-  const total = row.totalTokens ?? 0;
-  const ctx = row.contextTokens ?? 0;
-  return ctx ? `${total} / ${ctx}` : String(total);
+  if (input > 0 || output > 0) {
+    return `入 ${input} · 出 ${output} · 计 ${total}`;
+  }
+  return String(total);
+}
+
+const SESSION_SOURCE_LABELS: Record<string, string> = {
+  web: "Web",
+  weixin: "微信",
+  wechat: "微信",
+  dingtalk: "钉钉",
+  feishu: "飞书",
+  lark: "飞书",
+  webhook: "Webhook",
+  qq: "QQ",
+  telegram: "Telegram",
+  slack: "Slack",
+  discord: "Discord",
+  nostr: "Nostr",
+  wework: "企业微信",
+};
+
+function formatChannelLabel(channel: string): string {
+  const normalized = channel.trim().toLowerCase();
+  return SESSION_SOURCE_LABELS[normalized] ?? channel;
+}
+
+export function formatSessionSource(row: GatewaySessionRow): string {
+  const channel = row.channel?.trim();
+  if (channel) {
+    return formatChannelLabel(channel);
+  }
+  const key = row.key.trim().toLowerCase();
+  if (key === "main" || key === "agent:main:main" || key.endsWith(":main")) {
+    return "Web";
+  }
+  const parts = key.split(":");
+  const agentOffset = parts[0] === "agent" ? 2 : 0;
+  if (parts.length > agentOffset) {
+    const candidate = parts[agentOffset];
+    if (candidate && SESSION_SOURCE_LABELS[candidate]) {
+      return formatChannelLabel(candidate);
+    }
+  }
+  if (parts.length > 0 && SESSION_SOURCE_LABELS[parts[0]]) {
+    return formatChannelLabel(parts[0]);
+  }
+  if (row.kind === "global") {
+    return "global";
+  }
+  return "Web";
 }
 
 export function formatEventPayload(payload: unknown): string {

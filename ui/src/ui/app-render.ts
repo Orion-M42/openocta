@@ -4,10 +4,21 @@ import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "./routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
+import {
+  compareSessionSidebarRows,
+  resolveSessionSidebarSubtitle,
+  resolveSessionSidebarTitle,
+} from "./session-sidebar.ts";
 import { renderChatControls, renderTab } from "./app-render.helpers.ts";
 import { loadChannels } from "./controllers/channels.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
-import { loadDigitalEmployees } from "./controllers/digital-employees.ts";
+import {
+  defaultChatSessionResources,
+  resetChatResourcesPanelUi,
+  toggleChatResourcesPanel,
+} from "./chat/chat-resources.ts";
+import { dispatchA2UIActionFromChat, loadChatHistory, readSessionAttachment } from "./controllers/chat.ts";
+import { fileBlockFromGatewayPayload } from "./chat/file-blocks.ts";
+import { downloadExtractedSkill, extractChatSkill } from "./controllers/chat-extract-skill.ts";
 import { applyConfig, loadConfig, runUpdate, saveConfig, saveConfigPatch, updateConfigFormValue, removeConfigFormValue } from "./controllers/config.ts";
 import {
   loadCronRuns,
@@ -57,18 +68,17 @@ import {
   getSkillFile,
   saveSkillFile,
 } from "./controllers/skills.ts";
-import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
+import { loadUsage } from "./controllers/usage.ts";
 import { icons } from "./icons.ts";
+import { buildSetupWizardProps } from "./app-setup-wizard.ts";
 import {
-  getProductTourSteps,
-  getTabGroups,
   iconForTab,
   normalizeBasePath,
   pathForTab,
   subtitleForTab,
   titleForTab,
 } from "./navigation.ts";
-import { renderProductTour } from "./views/product-tour.ts";
+import { renderSetupWizard } from "./views/setup-wizard.ts";
 import { nativeAlert, nativeConfirm, nativePrompt } from "./native-dialog-bridge.ts";
 import { t } from "./strings.js";
 
@@ -214,7 +224,7 @@ function sessionSidebarHaystackMatches(haystack: string, query: string): boolean
 }
 
 /** 侧栏会话 ⋯ 菜单预估高度（用于贴底向上展开） */
-const SESSION_OVERFLOW_FLYOUT_EST_HEIGHT = 132;
+const SESSION_OVERFLOW_FLYOUT_EST_HEIGHT = 176;
 const SESSION_OVERFLOW_GAP = 6;
 
 function positionSessionOverflowFromButtonRect(r: DOMRect): { top: number; right: number } {
@@ -233,6 +243,9 @@ function renderSessionOverflowFlyout(state: AppViewState, basePath: string) {
   }
   const key = ov.key;
   const isMainSession = key === "agent.main.main";
+  const sessionRow = state.sessionsResult?.sessions?.find((s) => s.key === key);
+  const pinnedAt = sessionRow?.pinnedAt ?? 0;
+  const isPinned = pinnedAt > 0;
   const close = () => {
     state.sessionOverflow = null;
   };
@@ -268,6 +281,17 @@ function renderSessionOverflowFlyout(state: AppViewState, basePath: string) {
         class="session-item__overflow-item"
         @click=${async () => {
           close();
+          await patchSession(state, key, { pinned: !isPinned });
+        }}
+      >
+        ${isPinned ? "取消置顶" : "置顶"}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="session-item__overflow-item"
+        @click=${async () => {
+          close();
           const url = shareUrlForKey();
           try {
             await navigator.clipboard.writeText(url);
@@ -296,6 +320,8 @@ function renderSessionOverflowFlyout(state: AppViewState, basePath: string) {
             state.chatMessage = "";
             state.chatAttachments = [];
             state.chatModelRef = null;
+            state.chatResources = defaultChatSessionResources();
+            resetChatResourcesPanelUi(state);
             state.chatStream = null;
             state.chatStreamStartedAt = null;
             state.chatRunId = null;
@@ -346,6 +372,7 @@ import {
 } from "./controllers/digital-employees.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
+import { resolveChatQuickPrompts } from "./scenario-templates.ts";
 import { renderConfig } from "./views/config.ts";
 import { renderEnvVars } from "./views/env-vars.ts";
 import { renderCronConfig, renderCronHistory } from "./views/cron.ts";
@@ -366,12 +393,11 @@ import { renderTutorials } from "./views/tutorials.ts";
 import { requestDesktopClearWorkspace, requestDesktopUninstall } from "./controllers/desktop-uninstall.ts";
 import { openExternalUrl } from "./open-external-url.ts";
 import { renderAbout } from "./views/about.ts";
-import { ONLINE_DOCUMENTATION_URL, renderDocumentation } from "./views/documentation.ts";
+import { ONLINE_DOCUMENTATION_URL } from "./views/documentation.ts";
 import { renderLlmTrace } from "./views/llm-trace.ts";
 import { renderSecurity } from "./views/security.ts";
 import { renderModels } from "./views/models.ts";
 import { computeModelLibraryCategories, renderModelLibrary } from "./views/model-library.ts";
-import { renderUsage } from "./views/usage.ts";
 import {
   handleMcpAddServer,
   handleMcpAddClose,
@@ -514,18 +540,12 @@ export function renderApp(state: AppViewState) {
     state.tab === "modelLibrary" ||
     state.tab === "tutorials";
   const isConfigArea =
-    state.tab === "config" ||
     state.tab === "envVars" ||
-    state.tab === "debug" ||
-    state.tab === "logs" ||
-    state.tab === "models" ||
     state.tab === "overview" ||
     state.tab === "channels" ||
     state.tab === "sessions" ||
-    state.tab === "usage" ||
     state.tab === "sandbox" ||
     state.tab === "llmTrace" ||
-    state.tab === "documentation" ||
     state.tab === "aboutUs";
   const isCollapsibleNavPage = isMessagePage || isScheduledTasks || isConfigArea;
   const isSideNavCollapsed = isCollapsibleNavPage && state.settings.navCollapsed;
@@ -554,13 +574,6 @@ export function renderApp(state: AppViewState) {
       </button>
     </div>
   `;
-  const productTourSteps = getProductTourSteps();
-  const productTourStep =
-    state.productTourActive && productTourSteps.length > 0
-      ? productTourSteps[
-          Math.min(Math.max(0, state.productTourStepIndex), productTourSteps.length - 1)
-        ]
-      : null;
   const shellClasses = [
     "shell",
     isChat ? "shell--chat" : "",
@@ -570,7 +583,7 @@ export function renderApp(state: AppViewState) {
     chatFocus ? "shell--chat-focus" : "",
     isSideNavCollapsed ? "shell--nav-collapsed" : "",
     state.onboarding ? "shell--onboarding" : "",
-    state.productTourActive ? "shell--product-tour" : "",
+    state.setupWizardActive ? "shell--setup-wizard" : "",
     state.isWindowsDesktop ? "shell--windows-desktop" : "",
     state.isWindowMaximised ? "shell--window-maximised" : "",
   ]
@@ -663,11 +676,9 @@ export function renderApp(state: AppViewState) {
                 </button>
               `;
             }
-            const tourHighlight =
-              productTourStep?.tab === tab ? "top-tab--product-tour" : "";
             return html`
               <button
-                class="top-tab topbar__no-drag ${active ? "top-tab--active" : ""} ${tourHighlight}"
+                class="top-tab topbar__no-drag ${active ? "top-tab--active" : ""}"
                 data-tour-tab=${tab ?? ""}
                 @click=${() => state.setTab((tab === "config" ? "overview" : tab)!)}
                 type="button"
@@ -682,6 +693,17 @@ export function renderApp(state: AppViewState) {
           })}
         </nav>
         <div class="topbar-status">
+          <div class="pill pill--link topbar__no-drag">
+            <button
+              type="button"
+              title="打开安装引导"
+              class="topbar-link topbar__no-drag"
+              @click=${() => state.openSetupWizard()}
+            >
+              <span class="topbar-link__icon" aria-hidden="true">${icons.helpCircle}</span>
+              <span class="topbar-link__label">配置引导</span>
+            </button>
+          </div>
           <div class="pill pill--link topbar__no-drag">
             <button
               type="button"
@@ -798,6 +820,8 @@ export function renderApp(state: AppViewState) {
                         state.chatMessage = "";
                         state.chatAttachments = [];
                         state.chatModelRef = null;
+                        state.chatResources = defaultChatSessionResources();
+                        resetChatResourcesPanelUi(state);
                         state.chatStream = null;
                         state.chatStreamStartedAt = null;
                         state.chatRunId = null;
@@ -832,17 +856,24 @@ export function renderApp(state: AppViewState) {
                             ? state.digitalEmployees?.find((e) => e.id === employeeId)
                             : null;
                           const origin = row.origin as Record<string, string> | undefined;
-                          const displayName =
-                            emp?.name ||
-                            (origin &&
-                              ((origin.label || origin.from || origin.to) as string)) ||
-                            (row.label as string | undefined) ||
-                            (row.displayName as string | undefined) ||
-                            (row.sessionId as string | undefined) ||
-                            key ||
-                            "会话";
-                          const subtitle =
+                          const derivedTitle = (row.derivedTitle as string | undefined)?.trim() || "";
+                          const lastPreview =
                             (row.lastMessagePreview as string | undefined)?.trim() || "";
+                          const displayName = resolveSessionSidebarTitle({
+                            key,
+                            derivedTitle,
+                            lastMessagePreview: lastPreview,
+                            label: row.label as string | undefined,
+                            displayName: row.displayName as string | undefined,
+                            sessionId: row.sessionId as string | undefined,
+                            origin,
+                            employeeName: emp?.name,
+                          });
+                          const subtitle = resolveSessionSidebarSubtitle(displayName, lastPreview);
+                          const pinnedAt =
+                            typeof row.pinnedAt === "number" ? row.pinnedAt : null;
+                          const updatedAt =
+                            typeof row.updatedAt === "number" ? row.updatedAt : null;
                           const haystack = buildSessionSidebarSearchHaystack(
                             row,
                             key,
@@ -860,18 +891,22 @@ export function renderApp(state: AppViewState) {
                             haystack,
                             kind,
                             labelDraft,
+                            pinnedAt,
+                            updatedAt,
                           };
                         });
                         const filtered = q.trim()
                           ? rows.filter((r) => sessionSidebarHaystackMatches(r.haystack, q))
                           : rows;
-                        return filtered.map(
-                          ({ key, isCustom, emp, displayName, subtitle, kind, labelDraft }) => {
+                        const sorted = [...filtered].sort(compareSessionSidebarRows);
+                        return sorted.map(
+                          ({ key, isCustom, emp, displayName, subtitle, kind, labelDraft, pinnedAt }) => {
                             const active = key && state.sessionKey === key;
                             const canEdit = isCustom;
                             const isEditing = state.sessionEditingKey === key;
                             const isGlobal = kind === "global";
                             const isMainSession = key === "agent.main.main";
+                            const isPinned = (pinnedAt ?? 0) > 0;
                             const saveEdit = async (newLabel: string) => {
                               if (!key) {
                                 state.sessionEditingKey = null;
@@ -882,7 +917,7 @@ export function renderApp(state: AppViewState) {
                             };
                             return html`
                           <div
-                            class="session-item ${active ? "session-item--active" : ""} ${canEdit ? "session-item--editable" : ""}"
+                            class="session-item ${active ? "session-item--active" : ""} ${canEdit ? "session-item--editable" : ""} ${isPinned ? "session-item--pinned" : ""}"
                             role="button"
                             tabindex="0"
                             @click=${async (e: Event) => {
@@ -900,6 +935,8 @@ export function renderApp(state: AppViewState) {
                               state.chatMessage = "";
                               state.chatAttachments = [];
                               state.chatModelRef = null;
+                              state.chatResources = defaultChatSessionResources();
+                              resetChatResourcesPanelUi(state);
                               state.chatStream = null;
                               state.chatStreamStartedAt = null;
                               state.chatRunId = null;
@@ -951,7 +988,14 @@ export function renderApp(state: AppViewState) {
                                       @click=${(e: Event) => e.stopPropagation()}
                                     /></span>
                                   `
-                                : html`<span class="session-item__text">${displayName}</span>`}
+                                : html`
+                                    <span class="session-item__text">
+                                      ${isPinned
+                                        ? html`<span class="session-item__pin" aria-label="已置顶">${icons.pin}</span>`
+                                        : nothing}
+                                      ${displayName}
+                                    </span>
+                                  `}
                               ${!isEditing && subtitle ? html`<span class="session-item__sub muted">${subtitle}</span>` : nothing}
                             </div>
                             ${
@@ -1040,7 +1084,6 @@ export function renderApp(state: AppViewState) {
                           ${renderTab(state, "overview")}
                           ${renderTab(state, "channels")}
                           ${renderTab(state, "sessions")}
-                          ${renderTab(state, "usage")}
                         </div>
                       </div>
                       <div class="nav-group">
@@ -1053,21 +1096,12 @@ export function renderApp(state: AppViewState) {
                         </div>
                       </div>
                       <div class="nav-group">
-                        <button class="nav-label nav-label--static" type="button">
-                          <span class="nav-label__text">配置</span>
-                        </button>
                         <div class="nav-group__items">
-                          ${renderTab(state, "config")}
                           ${renderTab(state, "envVars")}
-                          ${renderTab(state, "logs")}
                         </div>
                       </div>
                       <div class="nav-group">
-                        <button class="nav-label nav-label--static" type="button">
-                          <span class="nav-label__text">资源</span>
-                        </button>
                         <div class="nav-group__items">
-                          ${renderTab(state, "documentation")}
                           ${renderTab(state, "aboutUs")}
                         </div>
                       </div>
@@ -1165,12 +1199,10 @@ export function renderApp(state: AppViewState) {
                             </div>
                           `;
                         })()
-                    : state.tab === "tutorials"
-                      ? html`<div class="nav-empty"></div>`
-                      : html`<div class="nav-empty"></div>`
+                    : html`<div class="nav-empty"></div>`
         }
       </aside>`}
-      <main class="content ${isChat ? "content--chat" : ""} ${isCatalogArea ? "content--catalog" : ""} ${isAgentSwarmPage ? "content--agent-swarm" : ""} ${state.tab === "tutorials" ? "content--tutorials" : ""} ${state.tab === "documentation" ? "content--documentation" : ""} ${state.tab === "llmTrace" && state.llmTraceViewingSessionId != null ? "content--llm-trace-detail" : ""}">
+      <main class="content ${isChat ? "content--chat" : ""} ${isCatalogArea ? "content--catalog" : ""} ${isAgentSwarmPage ? "content--agent-swarm" : ""} ${state.tab === "tutorials" ? "content--tutorials" : ""} ${state.tab === "tutorials" && state.tutorialsActiveTab === "documentation" ? "content--documentation" : ""} ${state.tab === "llmTrace" && state.llmTraceViewingSessionId != null ? "content--llm-trace-detail" : ""}">
         ${isCatalogArea || isMessagePage || isAgentSwarmPage
           ? nothing
           : html`
@@ -1209,35 +1241,45 @@ export function renderApp(state: AppViewState) {
             ? renderOverview({
                 connected: state.connected,
                 hello: state.hello,
-                settings: state.settings,
-                password: state.password,
                 lastError: state.lastError,
                 presenceCount,
                 sessionsCount,
                 cronEnabled: state.cronStatus?.enabled ?? null,
                 cronNext,
                 lastChannelsRefresh: state.channelsLastSuccess,
-                onSettingsChange: (next) => state.applySettings(next),
-                onPasswordChange: (next) => (state.password = next),
-                onSessionKeyChange: (next) => {
-                  state.sessionKey = next;
-                  state.chatMessage = "";
-                  state.chatAttachments = [];
-                  state.chatModelRef = null;
-                  state.chatStream = null;
-                  state.chatStreamStartedAt = null;
-                  state.chatRunId = null;
-                  state.chatQueue = [];
-                  state.resetToolStream();
-                  state.applySettings({
-                    ...state.settings,
-                    sessionKey: next,
-                    lastActiveSessionKey: next,
-                  });
-                  void state.loadAssistantIdentity();
+                skillsReport: state.skillsReport,
+                skillsLoading: state.skillsLoading,
+                configSnapshot:
+                  (state.configSnapshot?.config as Record<string, unknown> | null | undefined) ??
+                  null,
+                configLoading: state.configLoading,
+                usageLoading: state.usageLoading,
+                usageError: state.usageError,
+                usageStartDate: state.usageStartDate,
+                usageEndDate: state.usageEndDate,
+                usageResult: state.usageResult,
+                usageCostSummary: state.usageCostSummary,
+                usageChartMode: state.usageChartMode,
+                usageDailyChartMode: state.usageDailyChartMode,
+                usageTimeZone: state.usageTimeZone,
+                onStartDateChange: (date) => {
+                  state.usageStartDate = date;
+                  debouncedLoadUsage(state);
                 },
-                onConnect: () => state.connect(),
+                onEndDateChange: (date) => {
+                  state.usageEndDate = date;
+                  debouncedLoadUsage(state);
+                },
                 onRefresh: () => state.loadOverview(),
+                onChartModeChange: (mode) => {
+                  state.usageChartMode = mode;
+                },
+                onDailyChartModeChange: (mode) => {
+                  state.usageDailyChartMode = mode;
+                },
+                onTimeZoneChange: (zone) => {
+                  state.usageTimeZone = zone;
+                },
               })
             : nothing
         }
@@ -1376,269 +1418,6 @@ export function renderApp(state: AppViewState) {
         }
 
         ${
-          state.tab === "usage"
-            ? renderUsage({
-                loading: state.usageLoading,
-                error: state.usageError,
-                startDate: state.usageStartDate,
-                endDate: state.usageEndDate,
-                sessions: state.usageResult?.sessions ?? [],
-                sessionsLimitReached: (state.usageResult?.sessions?.length ?? 0) >= 1000,
-                totals: state.usageResult?.totals ?? null,
-                aggregates: state.usageResult?.aggregates ?? null,
-                costDaily: state.usageCostSummary?.daily ?? [],
-                selectedSessions: state.usageSelectedSessions,
-                selectedDays: state.usageSelectedDays,
-                selectedHours: state.usageSelectedHours,
-                chartMode: state.usageChartMode,
-                dailyChartMode: state.usageDailyChartMode,
-                timeSeriesMode: state.usageTimeSeriesMode,
-                timeSeriesBreakdownMode: state.usageTimeSeriesBreakdownMode,
-                timeSeries: state.usageTimeSeries,
-                timeSeriesLoading: state.usageTimeSeriesLoading,
-                sessionLogs: state.usageSessionLogs,
-                sessionLogsLoading: state.usageSessionLogsLoading,
-                sessionLogsExpanded: state.usageSessionLogsExpanded,
-                logFilterRoles: state.usageLogFilterRoles,
-                logFilterTools: state.usageLogFilterTools,
-                logFilterHasTools: state.usageLogFilterHasTools,
-                logFilterQuery: state.usageLogFilterQuery,
-                query: state.usageQuery,
-                queryDraft: state.usageQueryDraft,
-                sessionSort: state.usageSessionSort,
-                sessionSortDir: state.usageSessionSortDir,
-                recentSessions: state.usageRecentSessions,
-                sessionsTab: state.usageSessionsTab,
-                visibleColumns:
-                  state.usageVisibleColumns as import("./views/usage.ts").UsageColumnId[],
-                timeZone: state.usageTimeZone,
-                contextExpanded: state.usageContextExpanded,
-                headerPinned: state.usageHeaderPinned,
-                onStartDateChange: (date) => {
-                  state.usageStartDate = date;
-                  state.usageSelectedDays = [];
-                  state.usageSelectedHours = [];
-                  state.usageSelectedSessions = [];
-                  debouncedLoadUsage(state);
-                },
-                onEndDateChange: (date) => {
-                  state.usageEndDate = date;
-                  state.usageSelectedDays = [];
-                  state.usageSelectedHours = [];
-                  state.usageSelectedSessions = [];
-                  debouncedLoadUsage(state);
-                },
-                onRefresh: () => loadUsage(state),
-                onTimeZoneChange: (zone) => {
-                  state.usageTimeZone = zone;
-                },
-                onToggleContextExpanded: () => {
-                  state.usageContextExpanded = !state.usageContextExpanded;
-                },
-                onToggleSessionLogsExpanded: () => {
-                  state.usageSessionLogsExpanded = !state.usageSessionLogsExpanded;
-                },
-                onLogFilterRolesChange: (next) => {
-                  state.usageLogFilterRoles = next;
-                },
-                onLogFilterToolsChange: (next) => {
-                  state.usageLogFilterTools = next;
-                },
-                onLogFilterHasToolsChange: (next) => {
-                  state.usageLogFilterHasTools = next;
-                },
-                onLogFilterQueryChange: (next) => {
-                  state.usageLogFilterQuery = next;
-                },
-                onLogFilterClear: () => {
-                  state.usageLogFilterRoles = [];
-                  state.usageLogFilterTools = [];
-                  state.usageLogFilterHasTools = false;
-                  state.usageLogFilterQuery = "";
-                },
-                onToggleHeaderPinned: () => {
-                  state.usageHeaderPinned = !state.usageHeaderPinned;
-                },
-                onSelectHour: (hour, shiftKey) => {
-                  if (shiftKey && state.usageSelectedHours.length > 0) {
-                    const allHours = Array.from({ length: 24 }, (_, i) => i);
-                    const lastSelected =
-                      state.usageSelectedHours[state.usageSelectedHours.length - 1];
-                    const lastIdx = allHours.indexOf(lastSelected);
-                    const thisIdx = allHours.indexOf(hour);
-                    if (lastIdx !== -1 && thisIdx !== -1) {
-                      const [start, end] =
-                        lastIdx < thisIdx ? [lastIdx, thisIdx] : [thisIdx, lastIdx];
-                      const range = allHours.slice(start, end + 1);
-                      state.usageSelectedHours = [
-                        ...new Set([...state.usageSelectedHours, ...range]),
-                      ];
-                    }
-                  } else {
-                    if (state.usageSelectedHours.includes(hour)) {
-                      state.usageSelectedHours = state.usageSelectedHours.filter((h) => h !== hour);
-                    } else {
-                      state.usageSelectedHours = [...state.usageSelectedHours, hour];
-                    }
-                  }
-                },
-                onQueryDraftChange: (query) => {
-                  state.usageQueryDraft = query;
-                  if (state.usageQueryDebounceTimer) {
-                    window.clearTimeout(state.usageQueryDebounceTimer);
-                  }
-                  state.usageQueryDebounceTimer = window.setTimeout(() => {
-                    state.usageQuery = state.usageQueryDraft;
-                    state.usageQueryDebounceTimer = null;
-                  }, 250);
-                },
-                onApplyQuery: () => {
-                  if (state.usageQueryDebounceTimer) {
-                    window.clearTimeout(state.usageQueryDebounceTimer);
-                    state.usageQueryDebounceTimer = null;
-                  }
-                  state.usageQuery = state.usageQueryDraft;
-                },
-                onClearQuery: () => {
-                  if (state.usageQueryDebounceTimer) {
-                    window.clearTimeout(state.usageQueryDebounceTimer);
-                    state.usageQueryDebounceTimer = null;
-                  }
-                  state.usageQueryDraft = "";
-                  state.usageQuery = "";
-                },
-                onSessionSortChange: (sort) => {
-                  state.usageSessionSort = sort;
-                },
-                onSessionSortDirChange: (dir) => {
-                  state.usageSessionSortDir = dir;
-                },
-                onSessionsTabChange: (tab) => {
-                  state.usageSessionsTab = tab;
-                },
-                onToggleColumn: (column) => {
-                  if (state.usageVisibleColumns.includes(column)) {
-                    state.usageVisibleColumns = state.usageVisibleColumns.filter(
-                      (entry) => entry !== column,
-                    );
-                  } else {
-                    state.usageVisibleColumns = [...state.usageVisibleColumns, column];
-                  }
-                },
-                onSelectSession: (key, shiftKey) => {
-                  state.usageTimeSeries = null;
-                  state.usageSessionLogs = null;
-                  state.usageRecentSessions = [
-                    key,
-                    ...state.usageRecentSessions.filter((entry) => entry !== key),
-                  ].slice(0, 8);
-
-                  if (shiftKey && state.usageSelectedSessions.length > 0) {
-                    // Shift-click: select range from last selected to this session
-                    // Sort sessions same way as displayed (by tokens or cost descending)
-                    const isTokenMode = state.usageChartMode === "tokens";
-                    const sortedSessions = [...(state.usageResult?.sessions ?? [])].toSorted(
-                      (a, b) => {
-                        const valA = isTokenMode
-                          ? (a.usage?.totalTokens ?? 0)
-                          : (a.usage?.totalCost ?? 0);
-                        const valB = isTokenMode
-                          ? (b.usage?.totalTokens ?? 0)
-                          : (b.usage?.totalCost ?? 0);
-                        return valB - valA;
-                      },
-                    );
-                    const allKeys = sortedSessions.map((s) => s.key);
-                    const lastSelected =
-                      state.usageSelectedSessions[state.usageSelectedSessions.length - 1];
-                    const lastIdx = allKeys.indexOf(lastSelected);
-                    const thisIdx = allKeys.indexOf(key);
-                    if (lastIdx !== -1 && thisIdx !== -1) {
-                      const [start, end] =
-                        lastIdx < thisIdx ? [lastIdx, thisIdx] : [thisIdx, lastIdx];
-                      const range = allKeys.slice(start, end + 1);
-                      const newSelection = [...new Set([...state.usageSelectedSessions, ...range])];
-                      state.usageSelectedSessions = newSelection;
-                    }
-                  } else {
-                    // Regular click: focus a single session (so details always open).
-                    // Click the focused session again to clear selection.
-                    if (
-                      state.usageSelectedSessions.length === 1 &&
-                      state.usageSelectedSessions[0] === key
-                    ) {
-                      state.usageSelectedSessions = [];
-                    } else {
-                      state.usageSelectedSessions = [key];
-                    }
-                  }
-
-                  // Load timeseries/logs only if exactly one session selected
-                  if (state.usageSelectedSessions.length === 1) {
-                    void loadSessionTimeSeries(state, state.usageSelectedSessions[0]);
-                    void loadSessionLogs(state, state.usageSelectedSessions[0]);
-                  }
-                },
-                onSelectDay: (day, shiftKey) => {
-                  if (shiftKey && state.usageSelectedDays.length > 0) {
-                    // Shift-click: select range from last selected to this day
-                    const allDays = (state.usageCostSummary?.daily ?? []).map((d) => d.date);
-                    const lastSelected =
-                      state.usageSelectedDays[state.usageSelectedDays.length - 1];
-                    const lastIdx = allDays.indexOf(lastSelected);
-                    const thisIdx = allDays.indexOf(day);
-                    if (lastIdx !== -1 && thisIdx !== -1) {
-                      const [start, end] =
-                        lastIdx < thisIdx ? [lastIdx, thisIdx] : [thisIdx, lastIdx];
-                      const range = allDays.slice(start, end + 1);
-                      // Merge with existing selection
-                      const newSelection = [...new Set([...state.usageSelectedDays, ...range])];
-                      state.usageSelectedDays = newSelection;
-                    }
-                  } else {
-                    // Regular click: toggle single day
-                    if (state.usageSelectedDays.includes(day)) {
-                      state.usageSelectedDays = state.usageSelectedDays.filter((d) => d !== day);
-                    } else {
-                      state.usageSelectedDays = [day];
-                    }
-                  }
-                },
-                onChartModeChange: (mode) => {
-                  state.usageChartMode = mode;
-                },
-                onDailyChartModeChange: (mode) => {
-                  state.usageDailyChartMode = mode;
-                },
-                onTimeSeriesModeChange: (mode) => {
-                  state.usageTimeSeriesMode = mode;
-                },
-                onTimeSeriesBreakdownChange: (mode) => {
-                  state.usageTimeSeriesBreakdownMode = mode;
-                },
-                onClearDays: () => {
-                  state.usageSelectedDays = [];
-                },
-                onClearHours: () => {
-                  state.usageSelectedHours = [];
-                },
-                onClearSessions: () => {
-                  state.usageSelectedSessions = [];
-                  state.usageTimeSeries = null;
-                  state.usageSessionLogs = null;
-                },
-                onClearFilters: () => {
-                  state.usageSelectedDays = [];
-                  state.usageSelectedHours = [];
-                  state.usageSelectedSessions = [];
-                  state.usageTimeSeries = null;
-                  state.usageSessionLogs = null;
-                },
-              })
-            : nothing
-        }
-
-        ${
           state.tab === "cron" || state.tab === "scheduledTasks"
             ? renderCronConfig({
                 basePath: state.basePath,
@@ -1713,6 +1492,9 @@ export function renderApp(state: AppViewState) {
                 error: state.cronError,
                 busy: state.cronBusy,
                 form: state.cronForm,
+                addModalOpen: state.cronAddModalOpen,
+                onOpenAddModal: () => (state.cronAddModalOpen = true),
+                onCloseAddModal: () => (state.cronAddModalOpen = false),
                 digitalEmployees: state.digitalEmployees,
                 digitalEmployeesLoading: state.digitalEmployeesLoading,
                 channels: state.channelsSnapshot?.channelMeta?.length
@@ -2619,12 +2401,24 @@ export function renderApp(state: AppViewState) {
                 }
 
                 return renderTutorials({
+                activeTab: state.tutorialsActiveTab,
                 loading: state.tutorialsLoading,
                 error: state.tutorialsError,
                 categories: state.tutorialCategories,
                 query: state.tutorialsQuery,
                 selectedCategoryId: state.tutorialsSelectedCategoryId,
                 playingLink: state.tutorialsPlayingLink,
+                onTabChange: (tab) => {
+                  state.tutorialsActiveTab = tab;
+                  if (tab === "video") {
+                    state.tutorialsPlayingLink = null;
+                  }
+                },
+                onOpenDocumentationExternal: () =>
+                  void openExternalUrl(ONLINE_DOCUMENTATION_URL, {
+                    gatewayHost: state.settings.gatewayUrl,
+                    gatewayToken: state.settings.token,
+                  }),
                 onQueryChange: (next) => {
                   if (state.tutorialsQueryDebounceTimer) {
                     window.clearTimeout(state.tutorialsQueryDebounceTimer);
@@ -2644,18 +2438,6 @@ export function renderApp(state: AppViewState) {
                 },
                 });
               })()
-            : nothing
-        }
-
-        ${
-          state.tab === "documentation"
-            ? renderDocumentation({
-                onOpenExternal: () =>
-                  void openExternalUrl(ONLINE_DOCUMENTATION_URL, {
-                    gatewayHost: state.settings.gatewayUrl,
-                    gatewayToken: state.settings.token,
-                  }),
-              })
             : nothing
         }
 
@@ -2886,11 +2668,14 @@ export function renderApp(state: AppViewState) {
           isChat
             ? renderChat({
                 sessionKey: state.sessionKey,
+                quickPrompts: resolveChatQuickPrompts(configValue),
                 onSessionKeyChange: (next) => {
                   state.sessionKey = next;
                   state.chatMessage = "";
                   state.chatAttachments = [];
                   state.chatModelRef = null;
+                  state.chatResources = defaultChatSessionResources();
+                  resetChatResourcesPanelUi(state);
                   state.chatStream = null;
                   state.chatStreamStartedAt = null;
                   state.chatRunId = null;
@@ -2966,6 +2751,65 @@ export function renderApp(state: AppViewState) {
                   return opts;
                 })(),
                 onModelRefChange: (next) => (state.chatModelRef = next),
+                resources: state.chatResources,
+                resourcesPanelOpen: state.chatResourcesPanelOpen,
+                resourcesTab: state.chatResourcesTab,
+                resourcesSkillSearch: state.chatResourcesSkillSearch,
+                resourcesMcpSearch: state.chatResourcesMcpSearch,
+                onResourcesPanelToggle: () => {
+                  toggleChatResourcesPanel(state);
+                },
+                onResourcesPanelClose: () => {
+                  resetChatResourcesPanelUi(state);
+                },
+                onResourcesTabChange: (tab) => {
+                  state.chatResourcesTab = tab;
+                },
+                onResourcesSkillSearchChange: (query) => {
+                  state.chatResourcesSkillSearch = query;
+                },
+                onResourcesMcpSearchChange: (query) => {
+                  state.chatResourcesMcpSearch = query;
+                },
+                onResourcesChange: (next) => {
+                  state.chatResources = next;
+                },
+                resourceSkillOptions: (state.skillsReport?.skills ?? []).filter(
+                  (s) => !s.disabled && s.eligible,
+                ),
+                resourceMcpOptions: (() => {
+                  const cfg = state.configSnapshot?.config as
+                    | { mcp?: { servers?: Record<string, { enabled?: boolean }> } }
+                    | null
+                    | undefined;
+                  const servers = cfg?.mcp?.servers ?? {};
+                  return Object.keys(servers)
+                    .filter((key) => servers[key]?.enabled !== false)
+                    .map((key) => ({ key, label: key }));
+                })(),
+                canExtractSkill:
+                  state.chatExtractSkillLoading ||
+                  (!state.chatLoading &&
+                    Array.isArray(state.chatMessages) &&
+                    state.chatMessages.length > 0),
+                extractSkillLoading: state.chatExtractSkillLoading,
+                extractSkillError: state.chatExtractSkillError,
+                extractSkillOpen: state.chatExtractSkillOpen,
+                extractSkillMarkdown: state.chatExtractSkillMarkdown,
+                extractSkillFilename: state.chatExtractSkillFilename,
+                onExtractSkill: () => void extractChatSkill(state),
+                onCloseExtractSkill: () => {
+                  state.chatExtractSkillOpen = false;
+                },
+                onDownloadExtractSkill: () => {
+                  if (!state.chatExtractSkillMarkdown) {
+                    return;
+                  }
+                  downloadExtractedSkill(
+                    state.chatExtractSkillMarkdown,
+                    state.chatExtractSkillFilename ?? "extracted-skill.md",
+                  );
+                },
                 loading: state.chatLoading,
                 sending: state.chatSending,
                 compactionStatus: state.compactionStatus,
@@ -2974,6 +2818,34 @@ export function renderApp(state: AppViewState) {
                 toolMessages: state.chatToolMessages,
                 stream: state.chatStream,
                 streamStartedAt: state.chatStreamStartedAt,
+                runPhase: state.chatRunPhase,
+                a2uiMessages: state.chatA2UIMessages,
+                client: state.client,
+                onA2UIAction: (action) => dispatchA2UIActionFromChat(state, action),
+                filePreview: state.chatFilePreview,
+                onFilePreview: (req) => {
+                  state.chatFilePreview = req;
+                },
+                onCloseFilePreview: () => {
+                  state.chatFilePreview = null;
+                },
+                onOpenAttachment: async (path) => {
+                  const payload = await readSessionAttachment(state, path);
+                  if (!payload) {
+                    state.lastError = `无法加载附件：${path}`;
+                    return;
+                  }
+                  const block = fileBlockFromGatewayPayload(payload);
+                  if (!block) {
+                    state.lastError = `无法解析附件：${path}`;
+                    return;
+                  }
+                  state.chatFilePreview = {
+                    filename: block.filename,
+                    mimeType: block.mimeType,
+                    url: block.url,
+                  };
+                },
                 draft: state.chatMessage,
                 queue: state.chatQueue,
                 connected: state.connected,
@@ -2998,7 +2870,16 @@ export function renderApp(state: AppViewState) {
                 onChatScroll: (event) => state.handleChatScroll(event),
                 onDraftChange: (next) => (state.chatMessage = next),
                 attachments: state.chatAttachments,
-                onAttachmentsChange: (next) => (state.chatAttachments = next),
+                attachmentError: state.chatAttachmentError,
+                onAttachmentsChange: (next) => {
+                  state.chatAttachments = next;
+                  if (next.length === 0) {
+                    state.chatAttachmentError = null;
+                  }
+                },
+                onAttachmentError: (message) => {
+                  state.chatAttachmentError = message;
+                },
                 onSend: () => state.handleSendChat(),
                 canAbort: Boolean(state.chatRunId),
                 onAbort: () => void state.handleAbortChat(),
@@ -3010,6 +2891,15 @@ export function renderApp(state: AppViewState) {
                 conversationOnly: state.chatConversationOnly,
                 onConversationOnlyChange: (next) => {
                   state.chatConversationOnly = next;
+                },
+                browserPreviewEnabled: !state.isDesktopShell,
+                browserPreviewOpen: state.chatBrowserPreviewOpen,
+                gatewayHost: state.settings.gatewayUrl,
+                gatewayToken: state.settings.token,
+                onBrowserPreviewToggle: () => {
+                  const next = !state.chatBrowserPreviewOpen;
+                  state.chatBrowserPreviewOpen = next;
+                  state.chatBrowserPreviewAutoOpened = false;
                 },
                 // Sidebar props for tool output viewing
                 sidebarOpen: state.sidebarOpen,
@@ -4043,13 +3933,7 @@ export function renderApp(state: AppViewState) {
           : nothing
       }
     </div>
-    ${renderProductTour({
-      active: state.productTourActive,
-      stepIndex: state.productTourStepIndex,
-      steps: productTourSteps,
-      onNext: () => state.productTourNext(),
-      onSkip: () => state.productTourSkip(),
-    })}
+    ${renderSetupWizard(buildSetupWizardProps(state))}
     ${renderNativeDialogOverlay({
       model: state.nativeDialog,
       promptValue: state.nativePromptInput,

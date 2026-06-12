@@ -113,6 +113,18 @@ type Strings = {
   overviewCronNext: string;
   overviewCronEnabled: string;
   overviewCronDisabled: string;
+  overviewPlatformStatus: string;
+  overviewPlatformStatusSub: string;
+  overviewLlmUsage: string;
+  overviewLlmUsageSub: string;
+  overviewUsageLimitHint: string;
+  overviewResources: string;
+  overviewResourcesSub: string;
+  overviewSkillsInstalled: string;
+  overviewMcpServers: string;
+  overviewScenario: string;
+  overviewScenarioNone: string;
+  overviewScenarioTasks: string;
   overviewNotes: string;
   overviewNotesSub: string;
   overviewNoteTailscale: string;
@@ -135,6 +147,16 @@ type Strings = {
   commonYes: string;
   commonNo: string;
   chatQueueRemoveConfirm: string;
+  chatBrowserPreviewTitle: string;
+  chatBrowserPreviewToggle: string;
+  chatBrowserPreviewRunning: string;
+  chatBrowserPreviewStopped: string;
+  chatBrowserPreviewRefresh: string;
+  chatBrowserPreviewClose: string;
+  chatBrowserPreviewScreenshot: string;
+  chatBrowserPreviewNoScreenshot: string;
+  chatBrowserPreviewShowSnapshot: string;
+  chatBrowserPreviewHideSnapshot: string;
   cronDeleteConfirm: string;
   employeeDeleteConfirm: string;
   // Channels
@@ -1027,7 +1049,7 @@ const EN: Strings = {
   tabGroupAgent: "Agent",
   tabGroupSettings: "Settings",
   subtitleAgents: "Manage agent workspaces, tools, and identities.",
-  subtitleOverview: "Gateway status, entry points, and a fast health read.",
+  subtitleOverview: "Platform health and LLM usage overview.",
   subtitleChannels: "Manage channels and settings.",
   subtitleInstances: "Presence beacons from connected clients and nodes.",
   subtitleSessions: "Inspect active sessions and adjust per-session defaults.",
@@ -1097,6 +1119,18 @@ const EN: Strings = {
   overviewCronNext: "Next wake",
   overviewCronEnabled: "Enabled",
   overviewCronDisabled: "Disabled",
+  overviewPlatformStatus: "Platform Status",
+  overviewPlatformStatusSub: "Connection health, sessions, and scheduled tasks at a glance.",
+  overviewLlmUsage: "LLM Usage",
+  overviewLlmUsageSub: "Token consumption, tool calls, and model activity for the selected range.",
+  overviewUsageLimitHint: "Showing the first 1,000 sessions. Narrow the date range for complete results.",
+  overviewResources: "Platform Resources",
+  overviewResourcesSub: "Installed skills, MCP servers, and the initialized scenario template.",
+  overviewSkillsInstalled: "Skills (enabled)",
+  overviewMcpServers: "MCP servers",
+  overviewScenario: "Initialized scenario",
+  overviewScenarioNone: "Not configured",
+  overviewScenarioTasks: "Scenario setup tasks",
   overviewNotes: "Notes",
   overviewNotesSub: "Quick reminders for remote control setups.",
   overviewNoteTailscale: "Tailscale serve",
@@ -1118,6 +1152,16 @@ const EN: Strings = {
   commonYes: "Yes",
   commonNo: "No",
   chatQueueRemoveConfirm: "Remove this queued message?",
+  chatBrowserPreviewTitle: "Server browser",
+  chatBrowserPreviewToggle: "Browser preview",
+  chatBrowserPreviewRunning: "Running",
+  chatBrowserPreviewStopped: "Stopped",
+  chatBrowserPreviewRefresh: "Refresh",
+  chatBrowserPreviewClose: "Close browser preview",
+  chatBrowserPreviewScreenshot: "Browser screenshot",
+  chatBrowserPreviewNoScreenshot: "No screenshot yet (browser may be idle)",
+  chatBrowserPreviewShowSnapshot: "Show accessibility snapshot",
+  chatBrowserPreviewHideSnapshot: "Hide accessibility snapshot",
   cronDeleteConfirm: "Delete this scheduled task?",
   employeeDeleteConfirm: "Delete this digital employee?",
   channelsConfigure: "Configure",
@@ -2021,7 +2065,7 @@ const ZH: Strings = {
   tabGroupAgent: "Agent",
   tabGroupSettings: "设置",
   subtitleAgents: "管理代理工作区、工具与身份。",
-  subtitleOverview: "网关状态、入口与健康概览。",
+  subtitleOverview: "平台运行状态与大模型用量概览。",
   subtitleChannels: "管理通道与设置。",
   subtitleInstances: "已连接客户端与节点的在线状态。",
   subtitleSessions: "查看活跃会话并调整每会话默认值。",
@@ -2091,6 +2135,18 @@ const ZH: Strings = {
   overviewCronNext: "下次执行",
   overviewCronEnabled: "已启用",
   overviewCronDisabled: "已禁用",
+  overviewPlatformStatus: "平台状态",
+  overviewPlatformStatusSub: "连接健康、会话与定时任务一览。",
+  overviewLlmUsage: "大模型用量",
+  overviewLlmUsageSub: "所选时间范围内的 Token 消耗、工具调用与模型活动。",
+  overviewUsageLimitHint: "仅展示前 1000 个会话，请缩小日期范围以查看完整数据。",
+  overviewResources: "平台资源",
+  overviewResourcesSub: "已安装 Skill、MCP 服务与初始化场景。",
+  overviewSkillsInstalled: "Skill（已启用）",
+  overviewMcpServers: "MCP 服务",
+  overviewScenario: "初始化场景",
+  overviewScenarioNone: "未配置",
+  overviewScenarioTasks: "场景初始化任务",
   overviewNotes: "说明",
   overviewNotesSub: "远程控制相关简要提示。",
   overviewNoteTailscale: "Tailscale serve",
@@ -2112,6 +2168,16 @@ const ZH: Strings = {
   commonYes: "是",
   commonNo: "否",
   chatQueueRemoveConfirm: "确定移除此排队消息？",
+  chatBrowserPreviewTitle: "服务端浏览器",
+  chatBrowserPreviewToggle: "浏览器预览",
+  chatBrowserPreviewRunning: "运行中",
+  chatBrowserPreviewStopped: "未运行",
+  chatBrowserPreviewRefresh: "刷新",
+  chatBrowserPreviewClose: "关闭浏览器预览",
+  chatBrowserPreviewScreenshot: "浏览器截图",
+  chatBrowserPreviewNoScreenshot: "暂无截图（浏览器可能尚未启动）",
+  chatBrowserPreviewShowSnapshot: "显示无障碍快照",
+  chatBrowserPreviewHideSnapshot: "隐藏无障碍快照",
   cronDeleteConfirm: "确定删除此定时任务？",
   employeeDeleteConfirm: "确定删除此数字员工？",
   channelsConfigure: "配置",

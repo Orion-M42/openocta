@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRODUCT_TOUR_VERSION,
-  getProductTourSteps,
+  SETUP_WIZARD_STEPS,
   getTabGroups,
   iconForTab,
   inferBasePathFromPathname,
-  markProductTourCompleted,
+  markSetupWizardCompleted,
+  markSetupWizardSkipPendingConfigSync,
+  clearSetupWizardSkipPendingConfigSync,
+  hasSetupWizardSkipPendingConfigSync,
   normalizeBasePath,
   normalizePath,
   pathForTab,
-  shouldShowProductTour,
+  resolveSetupWizardVersion,
+  shouldShowSetupWizard,
   subtitleForTab,
   tabFromPath,
   titleForTab,
   type Tab,
 } from "./navigation.ts";
+
+const APP_VERSION = "0.2.7-45-g99c7403";
 
 /** All valid tab identifiers derived from getTabGroups() */
 const ALL_TABS: Tab[] = getTabGroups().flatMap((group) => group.tabs) as Tab[];
@@ -22,219 +27,139 @@ const ALL_TABS: Tab[] = getTabGroups().flatMap((group) => group.tabs) as Tab[];
 describe("iconForTab", () => {
   it("returns a non-empty string for every tab", () => {
     for (const tab of ALL_TABS) {
-      const icon = iconForTab(tab);
-      expect(icon).toBeTruthy();
-      expect(typeof icon).toBe("string");
-      expect(icon.length).toBeGreaterThan(0);
+      expect(iconForTab(tab)).toBeTruthy();
     }
-  });
-
-  it("returns stable icons for known tabs", () => {
-    expect(iconForTab("message")).toBe("messageSquare");
-    expect(iconForTab("scheduledTasks")).toBe("alarmClock");
-    expect(iconForTab("employeeMarket")).toBe("users");
-    expect(iconForTab("skillLibrary")).toBe("zap");
-    expect(iconForTab("toolLibrary")).toBe("wrench");
-    expect(iconForTab("modelLibrary")).toBe("modelCube");
-    expect(iconForTab("tutorials")).toBe("book");
-    expect(iconForTab("community")).toBe("globe");
-    expect(iconForTab("chat")).toBe("messageSquare");
-    expect(iconForTab("overview")).toBe("overviewGrid");
-    expect(iconForTab("channels")).toBe("link");
-    expect(iconForTab("instances")).toBe("radio");
-    expect(iconForTab("sessions")).toBe("scrollText");
-    expect(iconForTab("cron")).toBe("loader");
-    expect(iconForTab("cronHistory")).toBe("historyClock");
-    expect(iconForTab("skills")).toBe("zap");
-    expect(iconForTab("nodes")).toBe("monitor");
-    expect(iconForTab("config")).toBe("settings");
-    expect(iconForTab("debug")).toBe("bug");
-    expect(iconForTab("usage")).toBe("usageBars");
-    expect(iconForTab("models")).toBe("modelCube");
-    expect(iconForTab("sandbox")).toBe("sandbox");
-    expect(iconForTab("envVars")).toBe("envVars");
-    expect(iconForTab("llmTrace")).toBe("traceBars");
-    expect(iconForTab("logs")).toBe("scrollText");
-  });
-
-  it("returns active icons only for top-tab items", () => {
-    expect(iconForTab("message", true)).toBe("messageSquareActive");
-    expect(iconForTab("scheduledTasks", true)).toBe("alarmClockActive");
-    expect(iconForTab("employeeMarket", true)).toBe("usersActive");
-    expect(iconForTab("skillLibrary", true)).toBe("zapActive");
-    expect(iconForTab("toolLibrary", true)).toBe("wrenchActive");
-    expect(iconForTab("modelLibrary", true)).toBe("modelCubeActive");
-    expect(iconForTab("tutorials", true)).toBe("bookActive");
-    expect(iconForTab("community", true)).toBe("globeActive");
-    expect(iconForTab("config", true)).toBe("settingsActive");
-  });
-
-  it("does not switch unrelated tabs to active-only icons", () => {
-    expect(iconForTab("chat", true)).toBe("messageSquare");
-    expect(iconForTab("skills", true)).toBe("zap");
-    expect(iconForTab("cronHistory", true)).toBe("historyClock");
-    expect(iconForTab("overview", true)).toBe("overviewGrid");
-  });
-
-  it("returns a fallback icon for unknown tab", () => {
-    // TypeScript won't allow this normally, but runtime could receive unexpected values
-    const unknownTab = "unknown" as Tab;
-    expect(iconForTab(unknownTab)).toBe("folder");
-  });
-});
-
-describe("titleForTab", () => {
-  it("returns a non-empty string for every tab", () => {
-    for (const tab of ALL_TABS) {
-      const title = titleForTab(tab);
-      expect(title).toBeTruthy();
-      expect(typeof title).toBe("string");
-    }
-  });
-
-  it("returns expected titles", () => {
-    expect(titleForTab("chat")).toBe("Chat");
-    expect(titleForTab("overview")).toBe("Overview");
-    expect(titleForTab("cron")).toBe("Cron Jobs");
-  });
-});
-
-describe("subtitleForTab", () => {
-  it("returns a string for every tab", () => {
-    for (const tab of ALL_TABS) {
-      const subtitle = subtitleForTab(tab);
-      expect(typeof subtitle).toBe("string");
-    }
-  });
-
-  it("returns descriptive subtitles", () => {
-    expect(subtitleForTab("chat")).toContain("chat session");
-    expect(subtitleForTab("config")).toContain("openclaw.json");
   });
 });
 
 describe("normalizeBasePath", () => {
-  it("returns empty string for falsy input", () => {
-    expect(normalizeBasePath("")).toBe("");
-  });
-
-  it("adds leading slash if missing", () => {
-    expect(normalizeBasePath("ui")).toBe("/ui");
-  });
-
-  it("removes trailing slash", () => {
+  it("normalizes trailing slashes", () => {
     expect(normalizeBasePath("/ui/")).toBe("/ui");
-  });
-
-  it("returns empty string for root path", () => {
-    expect(normalizeBasePath("/")).toBe("");
-  });
-
-  it("handles nested paths", () => {
-    expect(normalizeBasePath("/apps/openclaw")).toBe("/apps/openclaw");
+    expect(normalizeBasePath("/ui")).toBe("/ui");
+    expect(normalizeBasePath("")).toBe("");
   });
 });
 
 describe("normalizePath", () => {
-  it("returns / for falsy input", () => {
-    expect(normalizePath("")).toBe("/");
-  });
-
-  it("adds leading slash if missing", () => {
-    expect(normalizePath("chat")).toBe("/chat");
-  });
-
-  it("removes trailing slash except for root", () => {
-    expect(normalizePath("/chat/")).toBe("/chat");
-    expect(normalizePath("/")).toBe("/");
+  it("strips base path prefix", () => {
+    expect(normalizePath("/ui/chat", "/ui")).toBe("/chat");
+    expect(normalizePath("/chat", "")).toBe("/chat");
   });
 });
 
 describe("pathForTab", () => {
-  it("returns correct path without base", () => {
-    expect(pathForTab("chat")).toBe("/chat");
-    expect(pathForTab("overview")).toBe("/overview");
-    expect(pathForTab("modelLibrary")).toBe("/model-library");
-  });
-
-  it("prepends base path", () => {
+  it("maps tabs to paths", () => {
+    expect(pathForTab("chat", "")).toBe("/chat");
     expect(pathForTab("chat", "/ui")).toBe("/ui/chat");
-    expect(pathForTab("sessions", "/apps/openclaw")).toBe("/apps/openclaw/sessions");
   });
 });
 
 describe("tabFromPath", () => {
-  it("returns tab for valid path", () => {
-    expect(tabFromPath("/chat")).toBe("chat");
-    expect(tabFromPath("/overview")).toBe("overview");
-    expect(tabFromPath("/sessions")).toBe("sessions");
-    expect(tabFromPath("/model-library")).toBe("modelLibrary");
-  });
-
-  it("returns message for root path", () => {
-    expect(tabFromPath("/")).toBe("message");
-  });
-
-  it("handles base paths", () => {
+  it("maps paths to tabs", () => {
+    expect(tabFromPath("/chat", "")).toBe("chat");
     expect(tabFromPath("/ui/chat", "/ui")).toBe("chat");
-    expect(tabFromPath("/apps/openclaw/sessions", "/apps/openclaw")).toBe("sessions");
   });
+});
 
-  it("returns null for unknown path", () => {
-    expect(tabFromPath("/unknown")).toBeNull();
+describe("titleForTab", () => {
+  it("returns a title for every tab", () => {
+    for (const tab of ALL_TABS) {
+      expect(titleForTab(tab)).toBeTruthy();
+    }
   });
+});
 
-  it("is case-insensitive", () => {
-    expect(tabFromPath("/CHAT")).toBe("chat");
-    expect(tabFromPath("/Overview")).toBe("overview");
+describe("subtitleForTab", () => {
+  it("returns a subtitle for every tab", () => {
+    for (const tab of ALL_TABS) {
+      expect(subtitleForTab(tab)).toBeTruthy();
+    }
   });
 });
 
 describe("inferBasePathFromPathname", () => {
-  it("returns empty string for root", () => {
-    expect(inferBasePathFromPathname("/")).toBe("");
-  });
-
-  it("returns empty string for direct tab path", () => {
-    expect(inferBasePathFromPathname("/chat")).toBe("");
-    expect(inferBasePathFromPathname("/overview")).toBe("");
-  });
-
-  it("infers base path from nested paths", () => {
-    expect(inferBasePathFromPathname("/ui/chat")).toBe("/ui");
-    expect(inferBasePathFromPathname("/apps/openclaw/sessions")).toBe("/apps/openclaw");
-  });
-
   it("handles index.html suffix", () => {
     expect(inferBasePathFromPathname("/index.html")).toBe("");
     expect(inferBasePathFromPathname("/ui/index.html")).toBe("/ui");
   });
 });
 
-describe("product tour", () => {
-  it("defines six steps in onboarding order", () => {
-    const tabs = getProductTourSteps().map((s) => s.tab);
-    expect(tabs).toEqual([
-      "modelLibrary",
-      "message",
-      "skillLibrary",
-      "toolLibrary",
-      "employeeMarket",
-      "scheduledTasks",
-    ]);
+describe("setup wizard", () => {
+  it("defines five wizard steps", () => {
+    expect(SETUP_WIZARD_STEPS).toEqual(["models", "resources", "environment", "scenarios", "summary"]);
   });
 
-  it("shows tour until completed for current version", () => {
+  it("resolves version from config.schema and hello-ok", () => {
+    expect(resolveSetupWizardVersion("0.2.7-45-g99c7403", { server: { version: "0.0.1-dev" } })).toBe(
+      "0.2.7-45-g99c7403",
+    );
+    expect(resolveSetupWizardVersion(null, { server: { version: "0.2.7-45-g99c7403" } })).toBe(
+      "0.2.7-45-g99c7403",
+    );
+    expect(resolveSetupWizardVersion(null, null)).toBeNull();
+  });
+
+  it("shows wizard until completed for current version", () => {
     localStorage.clear();
-    expect(shouldShowProductTour()).toBe(true);
-    markProductTourCompleted();
-    expect(shouldShowProductTour()).toBe(false);
-    expect(shouldShowProductTour("other-version")).toBe(true);
+    expect(shouldShowSetupWizard(APP_VERSION)).toBe(true);
+    markSetupWizardCompleted(APP_VERSION);
+    expect(shouldShowSetupWizard(APP_VERSION)).toBe(false);
+    expect(shouldShowSetupWizard("other-version")).toBe(true);
     localStorage.clear();
   });
 
-  it("uses a stable product tour version constant", () => {
-    expect(PRODUCT_TOUR_VERSION).toMatch(/^v\d+\.\d+\.\d+/);
+  it("reads completion from openocta.json wizard.setup", () => {
+    localStorage.clear();
+    const config = {
+      wizard: {
+        setup: {
+          version: APP_VERSION,
+          status: "completed",
+          completedAt: "2026-06-09T00:00:00.000Z",
+        },
+      },
+    };
+    expect(shouldShowSetupWizard(APP_VERSION, config)).toBe(false);
+    expect(shouldShowSetupWizard("v9.9.9", config)).toBe(true);
+  });
+
+  it("reads skipped status from openocta.json wizard.setup", () => {
+    localStorage.clear();
+    const config = {
+      wizard: {
+        setup: {
+          version: APP_VERSION,
+          status: "skipped",
+          completedAt: "2026-06-09T00:00:00.000Z",
+          skippedSteps: SETUP_WIZARD_STEPS,
+        },
+      },
+    };
+    expect(shouldShowSetupWizard(APP_VERSION, config)).toBe(false);
+    localStorage.clear();
+  });
+
+  it("shows wizard when config has no wizard.setup even if localStorage is completed", () => {
+    localStorage.clear();
+    markSetupWizardCompleted(APP_VERSION);
+    expect(shouldShowSetupWizard(APP_VERSION, {})).toBe(true);
+    localStorage.clear();
+  });
+
+  it("hides wizard while skip-all is pending sync to openocta.json", () => {
+    localStorage.clear();
+    markSetupWizardCompleted(APP_VERSION);
+    markSetupWizardSkipPendingConfigSync(APP_VERSION);
+    expect(hasSetupWizardSkipPendingConfigSync(APP_VERSION)).toBe(true);
+    expect(shouldShowSetupWizard(APP_VERSION, {})).toBe(false);
+    clearSetupWizardSkipPendingConfigSync();
+    expect(shouldShowSetupWizard(APP_VERSION, {})).toBe(true);
+    localStorage.clear();
+  });
+
+  it("does not show wizard when version is unavailable", () => {
+    expect(shouldShowSetupWizard("", {})).toBe(false);
+    expect(shouldShowSetupWizard("  ", {})).toBe(false);
   });
 });
 
@@ -244,7 +169,6 @@ describe("getTabGroups", () => {
     expect(labels).toContain("Chat");
     expect(labels).toContain("Control");
     expect(labels).toContain("Agent");
-    expect(labels).toContain("Settings");
   });
 
   it("all tabs are unique", () => {

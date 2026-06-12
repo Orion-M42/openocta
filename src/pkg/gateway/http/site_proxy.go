@@ -85,11 +85,11 @@ func remoteIDFromItem(id interface{}) string {
 }
 
 func setSiteProxyCORSHeaders(w http.ResponseWriter) {
-	// Keep it permissive: Control UI may run on a different origin during dev.
-	// We don't use credentials here, so "*" is safe and avoids origin bookkeeping.
+	// Keep it permissive: Control UI may run on a different origin during dev
+	// (e.g. localhost:5173 → 127.0.0.1:18900). No credentials, so "*" is safe.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-Gateway-Token")
 }
 
 // writeSiteProxyGenericUnavailable 不向客户端暴露上游 URL 或底层错误信息。

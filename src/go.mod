@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.3.1
+	github.com/go-rod/rod v0.116.2
 	github.com/go-sphere/wecom-aibot-go-sdk v0.0.0-00010101000000-000000000000
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
@@ -92,6 +93,11 @@ require (
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	github.com/ysmood/fetchup v0.2.3 // indirect
+	github.com/ysmood/goob v0.4.0 // indirect
+	github.com/ysmood/got v0.40.0 // indirect
+	github.com/ysmood/gson v0.7.3 // indirect
+	github.com/ysmood/leakless v0.9.0 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.40.0 // indirect
@@ -115,7 +121,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/stellarlinkco/agentsdk-go => github.com/zhanbei1/agentsdk-go v1.1.1
+replace github.com/stellarlinkco/agentsdk-go => ../../agentsdk-go
 
 // 使用 zhanbei1 fork（含扫码创建机器人 HTTP 与 aibot 包，module 路径仍为 go-sphere）
 replace github.com/go-sphere/wecom-aibot-go-sdk => github.com/zhanbei1/wecom-aibot-go-sdk v0.0.2

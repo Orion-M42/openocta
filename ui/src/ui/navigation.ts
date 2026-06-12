@@ -7,7 +7,6 @@ export function getTabGroups() {
     { label: t("tabGroupChat"), tabs: ["chat", "digitalEmployee"] as const },
     { label: t("tabGroupControl"), tabs: ["overview", "cron", "cronHistory"] as const },
     { label: t("tabGroupAgent"), tabs: ["skills", "mcp"] as const },
-    { label: t("tabGroupSettings"), tabs: ["config", "envVars", "logs"] as const },
   ];
 }
 
@@ -29,7 +28,6 @@ export type Tab =
   | "channels"
   | "instances"
   | "sessions"
-  | "usage"
   | "cron"
   | "skills"
   | "mcp"
@@ -62,7 +60,6 @@ const TAB_PATHS: Record<Tab, string> = {
   channels: "/channels",
   instances: "/instances",
   sessions: "/sessions",
-  usage: "/usage",
   cron: "/cron",
   skills: "/skills",
   mcp: "/mcp",
@@ -147,6 +144,9 @@ export function tabFromPath(pathname: string, basePath = ""): Tab | null {
   if (normalized === "/") {
     return "message";
   }
+  if (normalized === "/usage") {
+    return "overview";
+  }
   return PATH_TO_TAB.get(normalized) ?? null;
 }
 
@@ -219,8 +219,6 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "radio";
     case "sessions":
       return "scrollText";
-    case "usage":
-      return "usageBars";
     case "cron":
       return "loader";
     case "skills":
@@ -282,8 +280,6 @@ export function titleForTab(tab: Tab) {
       return t("navTitleInstances");
     case "sessions":
       return t("navTitleSessions");
-    case "usage":
-      return t("navTitleUsage");
     case "cron":
       return t("navTitleCron");
     case "skills":
@@ -317,77 +313,44 @@ export function titleForTab(tab: Tab) {
   }
 }
 
-/** Bump when product-tour copy or steps change; completion is tracked per version. */
-export const PRODUCT_TOUR_VERSION = "v0.2.7";
+export {
+  SETUP_WIZARD_STEPS,
+  resolveSetupWizardVersion,
+  shouldShowSetupWizard,
+  markSetupWizardCompleted,
+  markSetupWizardSkipPendingConfigSync,
+  clearSetupWizardSkipPendingConfigSync,
+  hasSetupWizardSkipPendingConfigSync,
+  syncSetupWizardCompletionCache,
+  createEmptySetupWizardSession,
+  type SetupWizardStepId,
+} from "./setup-wizard.ts";
 
-const PRODUCT_TOUR_STORAGE_KEY = "openocta.product-tour.completed.v1";
+import {
+  markSetupWizardCompleted,
+  shouldShowSetupWizard,
+} from "./setup-wizard.ts";
 
+/** @deprecated Use shouldShowSetupWizard */
+export function shouldShowProductTour(version?: string): boolean {
+  return shouldShowSetupWizard(version);
+}
+
+/** @deprecated Use markSetupWizardCompleted */
+export function markProductTourCompleted(version?: string): void {
+  markSetupWizardCompleted(version);
+}
+
+/** @deprecated Replaced by modal setup wizard */
 export type ProductTourStep = {
   tab: Tab;
   title: string;
   body: string;
 };
 
-/** First-run walkthrough steps (top bar order matches app-render top tabs). */
+/** @deprecated Replaced by modal setup wizard */
 export function getProductTourSteps(): ProductTourStep[] {
-  return [
-    {
-      tab: "modelLibrary",
-      title: "配置模型",
-      body: "在「模型」页添加模型厂商与可用模型，连接后即可为对话与 Agent 提供推理能力。",
-    },
-    {
-      tab: "message",
-      title: "开始对话",
-      body: "回到「消息」即可新建或选择会话，与助手聊天、执行任务，并查看历史记录。",
-    },
-    {
-      tab: "skillLibrary",
-      title: "探索技能库",
-      body: "在「技能库」浏览、安装社区技能，为 Agent 扩展文档处理、自动化等能力。",
-    },
-    {
-      tab: "toolLibrary",
-      title: "接入 MCP 工具",
-      body: "在「工具库」发现 MCP 服务与工具，一键接入数据库、浏览器、企业系统等外部能力。",
-    },
-    {
-      tab: "employeeMarket",
-      title: "数字员工",
-      body: "在「员工市场」挑选或启用数字员工模板，快速落地客服、运营、研发等角色化助手。",
-    },
-    {
-      tab: "scheduledTasks",
-      title: "定时任务",
-      body: "在「定时任务」配置巡检、周报、提醒等周期执行，让 Agent 按计划自动运行。",
-    },
-  ];
-}
-
-export function shouldShowProductTour(version: string = PRODUCT_TOUR_VERSION): boolean {
-  if (typeof localStorage === "undefined") {
-    return false;
-  }
-  try {
-    const raw = localStorage.getItem(PRODUCT_TOUR_STORAGE_KEY);
-    if (!raw) {
-      return true;
-    }
-    const parsed = JSON.parse(raw) as { version?: string };
-    return parsed.version !== version;
-  } catch {
-    return true;
-  }
-}
-
-export function markProductTourCompleted(version: string = PRODUCT_TOUR_VERSION): void {
-  if (typeof localStorage === "undefined") {
-    return;
-  }
-  localStorage.setItem(
-    PRODUCT_TOUR_STORAGE_KEY,
-    JSON.stringify({ version, completedAt: Date.now() }),
-  );
+  return [];
 }
 
 export function subtitleForTab(tab: Tab) {
@@ -424,8 +387,6 @@ export function subtitleForTab(tab: Tab) {
       return t("subtitleInstances");
     case "sessions":
       return t("subtitleSessions");
-    case "usage":
-      return t("subtitleUsage");
     case "cron":
       return t("subtitleCron");
     case "skills":

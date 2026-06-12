@@ -2,6 +2,31 @@
    CHAT TEXT STYLING
    ============================================= */
 
+.chat-bubble.streaming .chat-text::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--accent);
+  animation: chatStreamCaret 1s step-end infinite;
+}
+
+@keyframes chatStreamCaret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble.streaming .chat-text::after {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 .chat-text {
   font-size: 14px;
   line-height: 1.5;
@@ -136,4 +161,14 @@
   font-weight: 500;
   color: var(--text-secondary);
   background: var(--bg-content);
+}
+
+.chat-text :where(img) {
+  display: block;
+  max-width: min(100%, 420px);
+  max-height: 360px;
+  margin-top: 0.75em;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  cursor: zoom-in;
 }

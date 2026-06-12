@@ -2,19 +2,26 @@ import { html, nothing } from "lit";
 import type { EduCategory, EduCourse, EduLesson } from "../controllers/remote-market.ts";
 import { icons } from "../icons.js";
 import { getTutorialIcon } from "../tutorial-icons.ts";
+import { ONLINE_DOCUMENTATION_URL, renderDocumentation } from "./documentation.ts";
+
+export type TutorialTab = "video" | "documentation";
 
 export type TutorialsProps = {
+  activeTab: TutorialTab;
   loading: boolean;
   error: string | null;
   categories: EduCategory[];
   query: string;
   selectedCategoryId: number | null;
   playingLink: string | null;
+  documentationUrl?: string;
+  onTabChange: (tab: TutorialTab) => void;
   onQueryChange: (next: string) => void;
   onSelectCategory: (id: number) => void;
   onLessonClick: (link: string) => void;
   onPlayingClose: () => void;
   onRefresh: () => void;
+  onOpenDocumentationExternal?: () => void;
 };
 
 type SelectedTutorialLesson = {
@@ -127,7 +134,32 @@ const outcomes = [
   },
 ] as const;
 
+function renderTutorialTabs(activeTab: TutorialTab, onTabChange: (tab: TutorialTab) => void) {
+  const tabs: Array<{ id: TutorialTab; label: string }> = [
+    { id: "video", label: "视频教程" },
+    { id: "documentation", label: "文档教程" },
+  ];
+  return html`
+    <div class="tutorials-tabs" role="tablist" aria-label="教程类型">
+      ${tabs.map(
+        (tab) => html`
+          <button
+            type="button"
+            role="tab"
+            class="tutorials-tab ${activeTab === tab.id ? "active" : ""}"
+            aria-selected=${activeTab === tab.id ? "true" : "false"}
+            @click=${() => onTabChange(tab.id)}
+          >
+            ${tab.label}
+          </button>
+        `,
+      )}
+    </div>
+  `;
+}
+
 export function renderTutorials(props: TutorialsProps) {
+  const isVideoTab = props.activeTab === "video";
   const orderedCategories = [...(props.categories ?? [])].sort(
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name, "zh-Hans-CN"),
   );
@@ -149,22 +181,24 @@ export function renderTutorials(props: TutorialsProps) {
 
   const embedUrl = props.playingLink ? toBilibiliEmbedUrl(props.playingLink) : null;
   const selectedLesson = findSelectedTutorialLesson(orderedCategories, props.playingLink);
-  const toolbarActions = html`
-    <div class="emp-toolbar__actions">
-      <div class="emp-search">
-        <span class="input"><input
-          class="emp-search__input"
-          type="text"
-          placeholder="搜索课程/课时"
-          .value=${props.query}
-          ?disabled=${props.loading}
-          @input=${(e: Event) => props.onQueryChange((e.target as HTMLInputElement).value)}
-        /></span>
-        <span class="emp-search__icon" aria-hidden="true">${icons.search}</span>
-      </div>
-      <button class="btn" @click=${props.onRefresh} ?disabled=${props.loading}>刷新</button>
-    </div>
-  `;
+  const toolbarActions = isVideoTab
+    ? html`
+        <div class="emp-toolbar__actions">
+          <div class="emp-search">
+            <span class="input"><input
+              class="emp-search__input"
+              type="text"
+              placeholder="搜索课程/课时"
+              .value=${props.query}
+              ?disabled=${props.loading}
+              @input=${(e: Event) => props.onQueryChange((e.target as HTMLInputElement).value)}
+            /></span>
+            <span class="emp-search__icon" aria-hidden="true">${icons.search}</span>
+          </div>
+          <button class="btn" @click=${props.onRefresh} ?disabled=${props.loading}>刷新</button>
+        </div>
+      `
+    : nothing;
 
   return html`
     <main class="tutorials-page">
@@ -172,11 +206,14 @@ export function renderTutorials(props: TutorialsProps) {
         <div class="tutorials-board__header">
           <div class="tutorials-board__title-wrap">
             <h2 class="tutorials-board__title">OpenOcta 教程</h2>
+            ${renderTutorialTabs(props.activeTab, props.onTabChange)}
           </div>
           ${toolbarActions}
         </div>
         <div class="tutorials-board__body">
-          <aside class="tutorials-categories">
+          ${
+            isVideoTab
+              ? html`<aside class="tutorials-categories">
             ${orderedCategories.length === 0
               ? html`<button class="tutorials-category" disabled>暂无分类</button>`
               : orderedCategories.map((category) => {
@@ -198,9 +235,22 @@ export function renderTutorials(props: TutorialsProps) {
                     </button>
                   `;
                 })}
-          </aside>
+          </aside>`
+              : nothing
+          }
 
-          <div class="tutorials-content">
+          <div class="tutorials-content ${isVideoTab ? "" : "tutorials-content--documentation"}">
+            ${
+              !isVideoTab
+                ? renderDocumentation({
+                    url: props.documentationUrl ?? ONLINE_DOCUMENTATION_URL,
+                    onOpenExternal: props.onOpenDocumentationExternal,
+                  })
+                : nothing
+            }
+            ${
+              isVideoTab
+                ? html`
             ${props.error ? html`<div class="callout danger" style="margin-bottom: 16px;">${props.error}</div>` : nothing}
 
             ${
@@ -291,11 +341,14 @@ export function renderTutorials(props: TutorialsProps) {
                     `
                   : html`<div class="emp-empty">没有匹配的课程/课时</div>`
             }
+                `
+                : nothing
+            }
           </div>
         </div>
       </div>
 
-      <aside class="tutorials-outcomes">
+      ${isVideoTab ? html`<aside class="tutorials-outcomes">
         <h3 class="tutorials-outcomes__title">看看Ta们的学习成果</h3>
         <div class="tutorials-outcomes__list">
           ${outcomes.map(
@@ -313,9 +366,9 @@ export function renderTutorials(props: TutorialsProps) {
             `,
           )}
         </div>
-      </aside>
+      </aside>` : nothing}
 
-      ${props.playingLink
+      ${props.playingLink && isVideoTab
         ? html`
             <div class="modal-overlay" @click=${props.onPlayingClose} role="dialog" aria-modal="true" aria-labelledby="tutorial-detail-title">
               <div class="modal card emp-detail-modal emp-detail-modal--large tutorials-detail-modal" @click=${(e: Event) => e.stopPropagation()}>

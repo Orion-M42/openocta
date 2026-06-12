@@ -38,16 +38,16 @@ function buildProps(result: SessionsListResult): SessionsProps {
 }
 
 describe("sessions view", () => {
-  it("renders verbose=full without falling back to inherit", async () => {
+  it("renders session source from channel field", async () => {
     const container = document.createElement("div");
     render(
       renderSessions(
         buildProps(
           buildResult({
-            key: "agent:main:main",
-            kind: "direct",
+            key: "feishu:group:oc_abc",
+            kind: "group",
+            channel: "feishu",
             updatedAt: Date.now(),
-            verboseLevel: "full",
           }),
         ),
       ),
@@ -55,13 +55,10 @@ describe("sessions view", () => {
     );
     await Promise.resolve();
 
-    const selects = container.querySelectorAll("select");
-    const verbose = selects[1] as HTMLSelectElement | undefined;
-    expect(verbose?.value).toBe("full");
-    expect(Array.from(verbose?.options ?? []).some((option) => option.value === "full")).toBe(true);
+    expect(container.textContent).toContain("飞书");
   });
 
-  it("keeps unknown stored values selectable instead of forcing inherit", async () => {
+  it("renders token usage summary when totals are present", async () => {
     const container = document.createElement("div");
     render(
       renderSessions(
@@ -70,7 +67,9 @@ describe("sessions view", () => {
             key: "agent:main:main",
             kind: "direct",
             updatedAt: Date.now(),
-            reasoningLevel: "custom-mode",
+            inputTokens: 120,
+            outputTokens: 45,
+            totalTokens: 165,
           }),
         ),
       ),
@@ -78,11 +77,6 @@ describe("sessions view", () => {
     );
     await Promise.resolve();
 
-    const selects = container.querySelectorAll("select");
-    const reasoning = selects[2] as HTMLSelectElement | undefined;
-    expect(reasoning?.value).toBe("custom-mode");
-    expect(
-      Array.from(reasoning?.options ?? []).some((option) => option.value === "custom-mode"),
-    ).toBe(true);
+    expect(container.textContent).toContain("入 120 · 出 45 · 计 165");
   });
 });

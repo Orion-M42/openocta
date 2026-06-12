@@ -57,6 +57,7 @@ describe("sessions controller", () => {
           includeGlobal: false,
           includeUnknown: false,
           includeLastMessage: true,
+          includeDerivedTitles: true,
         },
       },
     ]);
@@ -92,6 +93,7 @@ describe("sessions controller", () => {
           includeGlobal: false,
           includeUnknown: false,
           includeLastMessage: true,
+          includeDerivedTitles: true,
         },
       },
     ]);
@@ -128,6 +130,7 @@ describe("sessions controller", () => {
           includeGlobal: false,
           includeUnknown: false,
           includeLastMessage: true,
+          includeDerivedTitles: true,
         },
       },
     ]);

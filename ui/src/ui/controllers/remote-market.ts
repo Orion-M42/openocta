@@ -1,14 +1,25 @@
 import { gatewayHttpBase } from "../gateway-url.ts";
 
+const OPENOCTA_SITE_ORIGIN = "https://openocta.com";
+
 function getBaseUrl(gatewayHost?: string): string {
   if (typeof window === "undefined") return "";
   if (gatewayHost?.trim()) {
     return gatewayHttpBase(gatewayHost);
   }
-  if (window.location?.port === "5173") {
-    // return "http://127.0.0.1:18900";
+  if (window.location?.origin) {
+    return window.location.origin;
   }
   return "";
+}
+
+async function directSiteGet<T>(path: string): Promise<T> {
+  const url = `${OPENOCTA_SITE_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(`OpenOcta 官网 API ${res.status} for ${path}`);
+  }
+  return (await res.json()) as T;
 }
 
 async function localGet<T>(path: string, gatewayHost?: string, token?: string): Promise<T> {
@@ -39,6 +50,19 @@ async function localGet<T>(path: string, gatewayHost?: string, token?: string): 
       throw new Error(msg);
     }
     throw err;
+  }
+}
+
+/** 优先走 Gateway 代理（同源），失败时回退 openocta.com 官网 API */
+async function siteGet<T>(path: string, opts?: RemoteMarketOptions): Promise<T> {
+  try {
+    return await localGet<T>(path, opts?.gatewayHost, opts?.token);
+  } catch (gatewayErr) {
+    try {
+      return await directSiteGet<T>(path);
+    } catch {
+      throw gatewayErr instanceof Error ? gatewayErr : new Error(String(gatewayErr));
+    }
   }
 }
 
@@ -194,7 +218,7 @@ export async function fetchEmployees(
   params: { q?: string; category?: string; status?: string },
   opts?: RemoteMarketOptions,
 ) {
-  return await localGet<EmployeeListItem[]>(`/api/v1/employees${toQuery(params)}`, opts?.gatewayHost, opts?.token);
+  return await siteGet<EmployeeListItem[]>(`/api/v1/employees${toQuery(params)}`, opts);
 }
 
 export async function fetchEmployeeDetail(id: number | string, opts?: RemoteMarketOptions) {
@@ -209,7 +233,7 @@ export async function fetchMcps(
   params: { q?: string; category?: string; status?: string },
   opts?: RemoteMarketOptions,
 ) {
-  return await localGet<McpListItem[]>(`/api/v1/mcps${toQuery(params)}`, opts?.gatewayHost, opts?.token);
+  return await siteGet<McpListItem[]>(`/api/v1/mcps${toQuery(params)}`, opts);
 }
 
 export async function fetchMcpDetail(id: number | string, opts?: RemoteMarketOptions) {
@@ -220,7 +244,7 @@ export async function fetchSkills(
   params: { q?: string; category?: string; status?: string },
   opts?: RemoteMarketOptions,
 ) {
-  return await localGet<SkillListItem[]>(`/api/v1/skills${toQuery(params)}`, opts?.gatewayHost, opts?.token);
+  return await siteGet<SkillListItem[]>(`/api/v1/skills${toQuery(params)}`, opts);
 }
 
 export async function fetchSkillDetail(folder: string, opts?: RemoteMarketOptions) {

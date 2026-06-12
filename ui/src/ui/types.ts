@@ -405,8 +405,12 @@ export type AgentsFilesSetResult = {
 export type GatewaySessionRow = {
   key: string;
   kind: "direct" | "group" | "global" | "unknown";
+  channel?: string;
   label?: string;
   displayName?: string;
+  derivedTitle?: string;
+  lastMessagePreview?: string;
+  pinnedAt?: number | null;
   surface?: string;
   subject?: string;
   room?: string;

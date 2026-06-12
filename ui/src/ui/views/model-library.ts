@@ -14,6 +14,19 @@ import { resolveModelProviderLogo } from "./model-provider-logos.js";
 
 export type ModelLibraryCategory = "__all__" | "public" | "local";
 
+/** 安装引导中展示的常见国内模型厂商（含本地 Ollama） */
+export const WIZARD_BUILTIN_PROVIDER_IDS = [
+  "deepseek",
+  "moonshot-cn",
+  "kimi-coding",
+  "zai",
+  "qianfan",
+  "bailian",
+  "xunfei",
+  "minimax",
+  "ollama",
+] as const;
+
 export type ModelLibraryProps = ModelsProps & {
   selectedCategory: ModelLibraryCategory;
 };
@@ -141,6 +154,17 @@ export function getModelLibraryEntries(
     });
 
   return [...builtinEntries, ...customEntries];
+}
+
+export function getWizardModelLibraryEntries(
+  providers: Record<string, ModelProvider>,
+  query: string,
+  defaultModelRef: string | null,
+): ModelLibraryProviderEntry[] {
+  const wizardBuiltin = new Set<string>(WIZARD_BUILTIN_PROVIDER_IDS);
+  return getModelLibraryEntries(providers, query, defaultModelRef).filter(
+    (entry) => !entry.builtin || wizardBuiltin.has(entry.key),
+  );
 }
 
 export function computeModelLibraryCategories(

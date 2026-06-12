@@ -88,12 +88,6 @@ func DefaultToolsWithInvoker(invoker GatewayInvoker) []tool.Tool {
 		//EnvProbeTool{},
 		WindowsCmdTool{},
 	}
-	//if invoker != nil {
-	//	list = append(list,
-	//		CronTool{Invoker: invoker},
-	//		GatewayTool{Invoker: invoker},
-	//		SessionsTool{Invoker: invoker},
-	//	)
-	//}
+	_ = invoker
 	return list
 }

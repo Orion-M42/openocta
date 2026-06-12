@@ -22,9 +22,60 @@ func formatApprovalCommand(toolName, target string) string {
 	return fmt.Sprintf("%s(%s)", name, target)
 }
 
+type approvalQueueOptions struct {
+	Queue                *octasecurity.ApprovalQueue
+	BlockWait            bool
+	CommandPolicy        *ResolvedCommandPolicy
+	AutoAllowSandboxBash bool
+}
+
+func shouldBlockForApproval(opts approvalQueueOptions, command string) bool {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return false
+	}
+	policy := opts.CommandPolicy
+	if policy == nil || !policy.Enabled {
+		return false
+	}
+	segments := splitShellCommandSegments(cmd)
+	if len(segments) == 0 {
+		return false
+	}
+	for _, segment := range segments {
+		action, explicit := policy.evaluateSingleCommandAccess(segment)
+		switch action {
+		case "deny":
+			return false
+		case "allow":
+			continue
+		case "ask":
+			if isAutoAllowShellSegment(segment) {
+				continue
+			}
+			if explicit {
+				return true
+			}
+			if !opts.AutoAllowSandboxBash {
+				return true
+			}
+		default:
+			if isAutoAllowShellSegment(segment) {
+				continue
+			}
+			if !opts.AutoAllowSandboxBash {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // approvalQueueMiddleware blocks bash execution until the OpenOcta approval queue allows it
-// (agentsdk-go v2 移除了内置 PermissionResolver / ApprovalQueue 挂载点).
-func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) middleware.Middleware {
+// when command policy requires human review (agentsdk-go v2 移除了内置 PermissionResolver / ApprovalQueue 挂载点).
+func approvalQueueMiddleware(opts approvalQueueOptions) middleware.Middleware {
+	q := opts.Queue
+	blockWait := opts.BlockWait
 	return middleware.Funcs{
 		Identifier: "openocta-approval-queue",
 		OnBeforeTool: func(ctx context.Context, st *middleware.State) error {
@@ -42,6 +93,9 @@ func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) midd
 			if strings.TrimSpace(cmd) == "" {
 				return nil
 			}
+			if !shouldBlockForApproval(opts, cmd) {
+				return nil
+			}
 			sid, _ := st.Values["session_id"].(string)
 			if strings.TrimSpace(sid) == "" {
 				return fmt.Errorf("openocta: approval queue requires session_id")
@@ -55,7 +109,7 @@ func approvalQueueMiddleware(q *octasecurity.ApprovalQueue, blockWait bool) midd
 				return nil
 			}
 			if !blockWait {
-				return fmt.Errorf("bash approval required (requestId=%s); approve via gateway", rec.ID)
+				return fmt.Errorf("bash approval required (requestId=%s): ask the user to reply 确认 or 取消 in the chat input box; do not use A2UI Button components", rec.ID)
 			}
 			resolved, err := q.Wait(ctx, rec.ID)
 			if err != nil {

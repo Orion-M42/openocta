@@ -71,12 +71,17 @@
 
 .content--tutorials {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .content--tutorials .tutorials-page {
   width: 100%;
   height: 100%;
   flex: 1;
+  min-height: 0;
 }
 
 .tutorials-page .emp-search__input {
@@ -87,15 +92,17 @@
 
 .tutorials-page {
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  justify-content: stretch;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
   gap: 16px;
   overflow: hidden;
 }
 
 .tutorials-board {
   flex: 1;
-  max-width: 1080px;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -133,6 +140,65 @@
 
 .tutorials-board__title-wrap {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tutorials-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tutorials-tab {
+  border: 1px solid var(--border, #333);
+  background: transparent;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.tutorials-tab:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+
+.tutorials-tab.active {
+  color: var(--text);
+  border-color: var(--accent, #4f8cff);
+  background: color-mix(in srgb, var(--accent, #4f8cff) 12%, transparent);
+}
+
+.tutorials-content--documentation {
+  padding: 0;
+  border-left: none;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tutorials-content--documentation .documentation-embed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.tutorials-content--documentation .documentation-embed__frame-wrap {
+  min-height: 0;
+  flex: 1;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
 }
 
 .tutorials-board__title {
@@ -404,12 +470,12 @@
   flex: none;
   width: 30%;
   max-width: 360px;
-  height: auto;
-  max-height: 100%;
+  height: 100%;
   background: var(--bg);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .tutorials-outcomes__title {

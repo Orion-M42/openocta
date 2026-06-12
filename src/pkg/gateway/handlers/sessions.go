@@ -72,6 +72,7 @@ type SessionsPatchParams struct {
 	SpawnedBy       *string `json:"spawnedBy,omitempty"`
 	SendPolicy      *string `json:"sendPolicy,omitempty"`
 	GroupActivation *string `json:"groupActivation,omitempty"`
+	Pinned          *bool   `json:"pinned,omitempty"`
 }
 
 // SessionsResetParams matches SessionsResetParams from TypeScript.
@@ -141,6 +142,7 @@ type GatewaySessionRow struct {
 	LastChannel        *string                `json:"lastChannel,omitempty"`
 	LastTo             *string                `json:"lastTo,omitempty"`
 	LastAccountID      *string                `json:"lastAccountId,omitempty"`
+	PinnedAt           *int64                 `json:"pinnedAt,omitempty"`
 }
 
 // SessionsPreviewResult matches SessionsPreviewResult from TypeScript.
@@ -215,15 +217,9 @@ func SessionsCreateHandler(opts HandlerOpts) error {
 	var next session.SessionEntry
 	_, err := updateSessionStore(storePath, func(store session.SessionStore) (session.SessionEntry, error) {
 		// Count existing custom sessions for default label
-		customCount := 0
-		for k := range store {
-			if strings.HasPrefix(strings.ToLower(k), "custom:") {
-				customCount++
-			}
-		}
 		newSessionID := uuid.New().String()
 		createdKey = "custom:" + newSessionID
-		label := fmt.Sprintf("自定义会话%d", customCount+1)
+		label := ""
 		if params != nil && params.Label != nil && strings.TrimSpace(*params.Label) != "" {
 			label = strings.TrimSpace(*params.Label)
 		}
@@ -1493,6 +1489,9 @@ func parseSessionsPatchParams(params map[string]interface{}) (*SessionsPatchPara
 	} else if params["sendPolicy"] == nil {
 		p.SendPolicy = nil
 	}
+	if pinned, ok := params["pinned"].(bool); ok {
+		p.Pinned = &pinned
+	}
 	return p, nil
 }
 
@@ -1926,7 +1925,6 @@ func listSessionsFromStore(cfg *config.OpenOctaConfig, storePath string, store s
 		inputTokens := 0
 		outputTokens := 0
 		totalTokens := 0
-		// TODO: Get tokens from entry when SessionEntry supports them
 
 		parsedChannel, _, parsedID, parsedGroupOK := parseGroupKey(key)
 		channel := entry.Channel
@@ -1973,6 +1971,21 @@ func listSessionsFromStore(cfg *config.OpenOctaConfig, storePath string, store s
 			model = "claude-sonnet-4-5-20250929"
 		}
 
+		if entry.SessionID != "" {
+			env := func(k string) string { return os.Getenv(k) }
+			transcriptPath := resolveSessionTranscriptPath(entry.SessionID, storePath, entry.SessionFile, sessionAgentID, env)
+			if transcriptPath != "" {
+				if usage, uerr := session.LoadSessionCostSummary(transcriptPath, nil, nil); uerr == nil && usage != nil {
+					inputTokens = usage.Input
+					outputTokens = usage.Output
+					totalTokens = usage.TotalTokens
+					if totalTokens == 0 {
+						totalTokens = usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+					}
+				}
+			}
+		}
+
 		row := GatewaySessionRow{
 			Key:           key,
 			Kind:          classifySessionKey(key, entry),
@@ -1986,6 +1999,10 @@ func listSessionsFromStore(cfg *config.OpenOctaConfig, storePath string, store s
 		}
 		if entry.Label != "" {
 			row.Label = &entry.Label
+		}
+		if entry.PinnedAt > 0 {
+			pinnedAt := entry.PinnedAt
+			row.PinnedAt = &pinnedAt
 		}
 		if displayName != "" {
 			row.DisplayName = &displayName
@@ -2033,9 +2050,17 @@ func listSessionsFromStore(cfg *config.OpenOctaConfig, storePath string, store s
 		rows = append(rows, row)
 	}
 
-	// Sort by updatedAt desc
+	// Sort: pinned first (pinnedAt desc), then updatedAt desc
 	for i := 0; i < len(rows)-1; i++ {
 		for j := i + 1; j < len(rows); j++ {
+			pinI := int64(0)
+			pinJ := int64(0)
+			if rows[i].PinnedAt != nil {
+				pinI = *rows[i].PinnedAt
+			}
+			if rows[j].PinnedAt != nil {
+				pinJ = *rows[j].PinnedAt
+			}
 			tsI := int64(0)
 			tsJ := int64(0)
 			if rows[i].UpdatedAt != nil {
@@ -2044,7 +2069,15 @@ func listSessionsFromStore(cfg *config.OpenOctaConfig, storePath string, store s
 			if rows[j].UpdatedAt != nil {
 				tsJ = *rows[j].UpdatedAt
 			}
-			if tsJ > tsI {
+			swap := false
+			if pinI == 0 && pinJ > 0 {
+				swap = true
+			} else if pinI > 0 && pinJ > 0 && pinJ > pinI {
+				swap = true
+			} else if pinI == pinJ && tsJ > tsI {
+				swap = true
+			}
+			if swap {
 				rows[i], rows[j] = rows[j], rows[i]
 			}
 		}
@@ -2218,6 +2251,13 @@ func applySessionsPatchToStore(cfg *config.OpenOctaConfig, store session.Session
 	if params.SpawnedBy != nil {
 		entry.SpawnedBy = strings.TrimSpace(*params.SpawnedBy)
 	}
+	if params.Pinned != nil {
+		if *params.Pinned {
+			entry.PinnedAt = now
+		} else {
+			entry.PinnedAt = 0
+		}
+	}
 
 	store[storeKey] = entry
 	return entry, nil
@@ -2232,6 +2272,9 @@ func sessionEntryToMap(entry session.SessionEntry) map[string]interface{} {
 	}
 	if entry.Label != "" {
 		m["label"] = entry.Label
+	}
+	if entry.PinnedAt > 0 {
+		m["pinnedAt"] = entry.PinnedAt
 	}
 	if entry.SpawnedBy != "" {
 		m["spawnedBy"] = entry.SpawnedBy

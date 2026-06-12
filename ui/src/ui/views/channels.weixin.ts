@@ -40,7 +40,7 @@ function weixinConfiguredFromForm(configForm: Record<string, unknown> | null): b
   return token !== "" && botId !== "";
 }
 
-function renderWeixinQrModal(props: ChannelsProps) {
+export function renderWeixinQrModal(props: ChannelsProps) {
   if (!props.weixinQrModalOpen) {
     return nothing;
   }
