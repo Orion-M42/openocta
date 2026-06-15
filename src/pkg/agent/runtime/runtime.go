@@ -59,27 +59,30 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 
 	// Built-in tools (bash, file_read, file_write, grep, glob, etc.) plus any caller-provided tools.
 	// When sandbox disabled, use NewDisabledSandbox so tools skip path/permission validation.
-	tools := BuiltinTools(projectRoot, !enableSandbox)
-	if shouldRegisterWebTools(opts) {
-		for _, t := range agenttools.WebToolsFromConfig(opts.Config, projectRoot) {
+	var tools []tool.Tool
+	if !opts.DisableTools {
+		tools = BuiltinTools(projectRoot, !enableSandbox)
+		if shouldRegisterWebTools(opts) {
+			for _, t := range agenttools.WebToolsFromConfig(opts.Config, projectRoot) {
+				tools = append(tools, t)
+			}
+		}
+		if shouldRegisterBrowserTools(opts) {
+			for _, t := range agenttools.BrowserToolsFromConfig(opts.Config) {
+				tools = append(tools, t)
+			}
+		}
+		if len(opts.Tools) > 0 {
+			extra := opts.Tools
+			if opts.EnableWebTools != nil && !*opts.EnableWebTools {
+				extra = agenttools.FilterOutWebTools(extra)
+			}
+			tools = append(tools, extra...)
+		}
+		// A2UI protocol tools (a2ui_push / a2ui_reset) for agent-driven UI in chat.
+		for _, t := range toolbuiltin.A2UITools() {
 			tools = append(tools, t)
 		}
-	}
-	if shouldRegisterBrowserTools(opts) {
-		for _, t := range agenttools.BrowserToolsFromConfig(opts.Config) {
-			tools = append(tools, t)
-		}
-	}
-	if len(opts.Tools) > 0 {
-		extra := opts.Tools
-		if opts.EnableWebTools != nil && !*opts.EnableWebTools {
-			extra = agenttools.FilterOutWebTools(extra)
-		}
-		tools = append(tools, extra...)
-	}
-	// A2UI protocol tools (a2ui_push / a2ui_reset) for agent-driven UI in chat.
-	for _, t := range toolbuiltin.A2UITools() {
-		tools = append(tools, t)
 	}
 	apiOpts := api.Options{
 		ModelFactory: opts.ModelFactory,
@@ -92,7 +95,11 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	// SDK 内部优化（见 agentsdk-go/docs/SDK-OPTIMIZATIONS.md）：
 	// 1) 结构化反思（Reflection）：把失败原因写入 middleware.State.Values["reflection.records"]
 	// 2) 工具输出落盘（ToolOutput）：OutputPersister 负责把过长输出落盘并在 history 中保留引用+摘要
-	{
+	if opts.DisableTools {
+		v := false
+		apiOpts.ReflectionEnabled = &v
+		apiOpts.EnabledBuiltinTools = []string{}
+	} else {
 		v := true
 		apiOpts.ReflectionEnabled = &v
 	}
@@ -319,8 +326,11 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		v := true
 		apiOpts.EnableA2UI = &v
 	}
-	// Skylark 在运行时构建阶段强制关闭，不读取 OPENOCTA_SKYLARK / agents.defaults.skylark / opts.Skylark。
-	apiOpts.Skylark = &api.SkylarkOptions{Enabled: false}
+	if opts.Knowledge != nil {
+		apiOpts.Knowledge = opts.Knowledge
+	} else {
+		apiOpts.Knowledge = resolveKnowledgeOptions(opts.Config, opts.Env, opts.AgentID)
+	}
 	// L4 自主进化：curated MEMORY/USER/SOUL/PROMPT + memory 工具（Hermes 风格 frozen snapshot）。
 	{
 		evoDir := projectRoot
@@ -363,6 +373,13 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 				base = strings.TrimSpace(base) + "\n\n" + skillsSection
 			} else {
 				base = skillsSection
+			}
+		}
+		if knowledgeSection := BuildSystemPromptKnowledgeSection(opts.Config, opts.AgentID, opts.Env); knowledgeSection != "" {
+			if base != "" {
+				base = strings.TrimSpace(base) + "\n\n" + knowledgeSection
+			} else {
+				base = knowledgeSection
 			}
 		}
 		if base != "" {
@@ -422,8 +439,8 @@ type Options struct {
 	EnableSystemPrompt bool
 	// SystemPromptOverrides if non-empty replaces the auto-built system prompt when EnableSystemPrompt is true.
 	SystemPromptOverrides string
-	// Skylark is ignored at runtime bootstrap (always disabled in New); kept for API compatibility.
-	Skylark *api.SkylarkOptions
+	// Knowledge configures Obsidian vault indexing (memory_search / session_search).
+	Knowledge *api.KnowledgeOptions
 	// AgentRunTimeout bounds Run/RunStream when ctx has no deadline; zero uses OPENOCTA_AGENT_RUN_TIMEOUT or DefaultAgentRunTimeout (10m). See EnvAgentRunTimeout.
 	AgentRunTimeout time.Duration
 	// MiddlewareTimeout is api.Options.MiddlewareTimeout (per middleware stage); zero uses OPENOCTA_MIDDLEWARE_TIMEOUT if set.
@@ -450,6 +467,8 @@ type Options struct {
 	EnableWebTools *bool
 	// DisallowedTools is passed to agentsdk-go api.Options for additional tool blacklisting.
 	DisallowedTools []string
+	// DisableTools skips all tool registration (pure LLM completion paths such as skill analyze/compose).
+	DisableTools bool
 }
 
 func shouldRegisterWebTools(opts Options) bool {

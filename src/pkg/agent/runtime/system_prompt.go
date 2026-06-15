@@ -60,6 +60,16 @@ func loadPromptMarkdownFiles(workspaceDir, promptDir string) ([]PromptFile, erro
 	if err := addDir(promptDir); err != nil {
 		return nil, err
 	}
+	if promptDir != "" {
+		if err := addDir(filepath.Join(promptDir, "prompt-zh")); err != nil {
+			return nil, err
+		}
+	}
+	if workspaceDir != "" {
+		if err := addDir(filepath.Join(workspaceDir, "prompt", "prompt-zh")); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 

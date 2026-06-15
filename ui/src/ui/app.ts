@@ -456,12 +456,27 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() skillEdits: Record<string, string> = {};
   @state() skillsBusyKey: string | null = null;
   @state() skillMessages: Record<string, SkillMessage> = {};
-  @state() skillsAddModalOpen = false;
-  @state() skillsUploadName = "";
-  @state() skillsUploadFiles: File[] = [];
+  @state() skillsAddPanel: import("./views/skill-create-modals.ts").SkillAddPanel = "closed";
+  @state() skillsUploadStep = 0;
+  @state() skillsUploadFile: File | null = null;
+  @state() skillsUploadAnalyze: import("./controllers/skill-create.ts").SkillAnalyzeResult | null = null;
+  @state() skillsUploadMeta: import("./controllers/skill-create.ts").SkillUploadMeta = {
+    name: "",
+    description: "",
+    category: "",
+    tags: "",
+    status: "open",
+  };
   @state() skillsUploadError: string | null = null;
   @state() skillsUploadTemplate: string | null = null;
   @state() skillsUploadBusy = false;
+  @state() skillsCreativeScenario: "free" | "upgrade" = "free";
+  @state() skillsCreativeMessages: import("./controllers/skill-create.ts").SkillComposeMessage[] = [];
+  @state() skillsCreativeDraft = "";
+  @state() skillsCreativeFiles: import("./controllers/skill-create.ts").SkillComposeFile[] = [];
+  @state() skillsCreativeInput = "";
+  @state() skillsCreativeReady = false;
+  @state() skillsCreativeSelectedFile: string | null = null;
 
   @state() swarmLoading = false;
   @state() swarmError: string | null = null;
@@ -575,6 +590,27 @@ export class OpenClawApp extends LitElement implements NativeDialogInvoker {
   @state() skillLibraryEditError: string | null = null;
   @state() skillLibraryEditSyntaxError: string | null = null;
   @state() skillLibraryEditSuccessMessage: string | null = null;
+
+  @state() knowledgeVaultLoadedOnce = false;
+  @state() knowledgeVaultLoading = false;
+  @state() knowledgeVaultError: string | null = null;
+  @state() knowledgeVaultDir = "";
+  @state() knowledgeVaultFiles: import("./controllers/vault.ts").VaultFileEntry[] = [];
+  @state() knowledgeVaultFolders: string[] = [];
+  @state() knowledgeVaultExpandedFolders: string[] = [];
+  @state() knowledgeVaultViewMode: import("./views/knowledge-vault.ts").KnowledgeVaultViewMode = "notes";
+  @state() knowledgeVaultSelectedPath: string | null = null;
+  @state() knowledgeVaultContent = "";
+  @state() knowledgeVaultContentLoading = false;
+  @state() knowledgeVaultEditMode = false;
+  @state() knowledgeVaultDraftContent = "";
+  @state() knowledgeVaultSaving = false;
+  @state() knowledgeVaultSaveMessage: string | null = null;
+  @state() knowledgeVaultSyncing = false;
+  @state() knowledgeVaultDirSaving = false;
+  @state() knowledgeVaultGraph: import("./controllers/vault.ts").VaultGraph | null = null;
+  @state() knowledgeVaultGraphLoading = false;
+  @state() knowledgeVaultQuery = "";
 
   @state() toolLibraryLoadedOnce = false;
   @state() toolLibraryLoading = false;

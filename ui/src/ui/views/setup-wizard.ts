@@ -1,6 +1,11 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { icons } from "../icons.js";
-import { SCENARIO_TEMPLATES, getScenarioTemplate, scenarioTaskLabel } from "../scenario-templates.ts";
+import {
+  SCENARIO_COMING_SOON_HINT,
+  SCENARIO_TEMPLATES,
+  getScenarioTemplate,
+  scenarioTaskLabel,
+} from "../scenario-templates.ts";
 import {
   SETUP_WIZARD_STEPS,
   setupWizardStepDescription,
@@ -986,6 +991,7 @@ function renderScenariosStep(props: SetupWizardProps) {
           `;
         })}
       </div>
+      <p class="setup-wizard__hint">${SCENARIO_COMING_SOON_HINT}</p>
       ${progress
         ? html`
             <div class="setup-wizard__progress">

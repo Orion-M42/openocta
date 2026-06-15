@@ -7,7 +7,7 @@
 1. **操作系统环境变量**：进程启动前已导出者。
 2. **嵌入的 `.env`**：单文件发行包在 `init` 时从 `embed/.env` 加载，**仅当某键在环境中仍为空时**写入（见 `src/embed/embed.go`）。
 3. **`config.env.vars`**：网关启动加载配置后，对其中每个键，若 `os.Getenv(k)` 为空则 `os.Setenv`（见 `src/pkg/gateway/http/server.go`）。因此下列多数变量也可写在 `openocta.json` 的 `env.vars` 中，且**已被用户或系统设置的同名环境变量**优先生效。
-4. **Agent Runtime 的 `Options.Env`**：创建 `runtime` 时传入的查找函数（常为 `os.Getenv`）；超时、`OPENOCTA_SKYLARK` 等通过该函数解析，与 `config.env.vars` 注入后的进程环境一致。
+4. **Agent Runtime 的 `Options.Env`**：创建 `runtime` 时传入的查找函数（常为 `os.Getenv`）；超时等通过该函数解析，与 `config.env.vars` 注入后的进程环境一致。
 
 以下未注明「仅构建时」的变量均为**运行时**由 Go 网关或 agent 读取。
 
@@ -70,14 +70,15 @@
 
 ---
 
-## 5. Agent 运行时（超时与 Skylark）
+## 5. Agent 运行时（超时）
 
 | 变量 | 说明                                                                                                                                                  |
 |------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | `OPENOCTA_AGENT_RUN_TIMEOUT` | 单次对话/运行的默认时限（Go `time.ParseDuration` 或**非负整数秒**）。未设置默认 **10 分钟**；用于无 deadline 的 `Run` 包装及网关 chat 默认 `timeoutMs`。设为 `0` 表示不追加运行上限（流式仍建议由调用方或请求参数控制）。 |
 | `OPENOCTA_MIDDLEWARE_TIMEOUT` | agentsdk **每条 middleware 阶段**超时；未设置则不限制该层。                                                                                                          |
 | `OPENOCTA_HOOK_TIMEOUT` | shell **hook** 默认超时；未设置则沿用 agentsdk 对 `0` 的内部默认（约 600s）。                                                                                            |
-| `OPENOCTA_SKYLARK` | Skylark 检索：**未设置或空**时默认关闭；`0` / `false` / `off` / `no` 关闭；`1` / `true` / `yes` / `on` 开启；其它未匹配时再读 `agents.defaults.skylark`（见 `src/pkg/agent/runtime/runtime.go`）。 |
+
+知识库 Vault 路径与索引由运行时自动解析，见 [knowledge-vault.md](./knowledge-vault.md)。可通过 `agents.defaults.knowledge.enabled` 关闭。
 
 ---
 

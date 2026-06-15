@@ -8,6 +8,8 @@ OpenOcta 的 Skills 系统基于 [`agentsdk-go` 的 Skills 抽象](https://docs.
 - 在对话中 Skills 的匹配与使用方式
 - 如何新增个人 Skill（单文件 / 目录结构）
 
+控制台 **Skill 上传向导** 与 **创意中心** 的交互与 API 说明见 [Skill 上传与创意中心](./skill-create-guide.md)。
+
 ---
 
 ## 一、Skills 加载与优先级

@@ -160,52 +160,12 @@ const CONFIG_FIELD_HELP: Record<Locale, Record<string, string>> = {
       'Include absolute timestamps in message envelopes ("on" or "off").',
     "agents.defaults.envelopeElapsed": 'Include elapsed time in message envelopes ("on" or "off").',
     "agents.defaults.models": "Configured model catalog (keys are full provider/model IDs).",
-    "agents.defaults.memorySearch":
-      "Vector search over MEMORY.md and memory/*.md (per-agent overrides supported).",
-    "agents.defaults.memorySearch.sources":
-      'Sources to index for memory search (default: ["memory"]; add "sessions" to include session transcripts).',
-    "agents.defaults.memorySearch.extraPaths":
-      "Extra paths to include in memory search (directories or .md files; relative paths resolved from workspace).",
-    "agents.defaults.memorySearch.experimental.sessionMemory":
-      "Enable experimental session transcript indexing for memory search (default: false).",
-    "agents.defaults.memorySearch.provider":
-      'Embedding provider ("openai", "gemini", "voyage", or "local").',
-    "agents.defaults.memorySearch.remote.baseUrl":
-      "Custom base URL for remote embeddings (OpenAI-compatible proxies or Gemini overrides).",
-    "agents.defaults.memorySearch.remote.apiKey":
-      "Custom API key for the remote embedding provider.",
-    "agents.defaults.memorySearch.remote.headers":
-      "Extra headers for remote embeddings (merged; remote overrides OpenAI headers).",
-    "agents.defaults.memorySearch.remote.batch.enabled":
-      "Enable batch API for memory embeddings (OpenAI/Gemini; default: true).",
-    "agents.defaults.memorySearch.remote.batch.wait":
-      "Wait for batch completion when indexing (default: true).",
-    "agents.defaults.memorySearch.remote.batch.concurrency":
-      "Max concurrent embedding batch jobs for memory indexing (default: 2).",
-    "agents.defaults.memorySearch.remote.batch.pollIntervalMs":
-      "Polling interval in ms for batch status (default: 2000).",
-    "agents.defaults.memorySearch.remote.batch.timeoutMinutes":
-      "Timeout in minutes for batch indexing (default: 60).",
-    "agents.defaults.memorySearch.local.modelPath":
-      "Local GGUF model path or hf: URI (node-llama-cpp).",
-    "agents.defaults.memorySearch.fallback":
-      'Fallback provider when embeddings fail ("openai", "gemini", "local", or "none").',
-    "agents.defaults.memorySearch.store.path":
-      "SQLite index path (default: ~/.openclaw/memory/{agentId}.sqlite).",
-    "agents.defaults.memorySearch.store.vector.enabled":
-      "Enable sqlite-vec extension for vector search (default: true).",
-    "agents.defaults.memorySearch.store.vector.extensionPath":
-      "Optional override path to sqlite-vec extension library (.dylib/.so/.dll).",
-    "agents.defaults.memorySearch.query.hybrid.enabled":
-      "Enable hybrid BM25 + vector search for memory (default: true).",
-    "agents.defaults.memorySearch.query.hybrid.vectorWeight":
-      "Weight for vector similarity when merging results (0-1).",
-    "agents.defaults.memorySearch.query.hybrid.textWeight":
-      "Weight for BM25 text relevance when merging results (0-1).",
-    "agents.defaults.memorySearch.query.hybrid.candidateMultiplier":
-      "Multiplier for candidate pool size (default: 4).",
-    "agents.defaults.memorySearch.cache.enabled":
-      "Cache chunk embeddings in SQLite to speed up reindexing and frequent updates (default: true).",
+    "agents.defaults.knowledge":
+      "Obsidian-compatible vault indexing for memory_search (vault path and index are auto-managed).",
+    "agents.defaults.knowledge.enabled":
+      "Enable vault sync and memory_search tool (default: true).",
+    "agents.defaults.knowledge.vaultDir":
+      "Absolute path to the Vault directory; when empty, uses workspace/vault or ~/.openocta/vault.",
     memory: "Memory backend configuration (global).",
     "memory.backend": 'Memory backend ("builtin" for OpenClaw embeddings, "qmd" for QMD sidecar).',
     "memory.citations": 'Default citation behavior ("auto", "on", or "off").',
@@ -238,15 +198,6 @@ const CONFIG_FIELD_HELP: Record<Locale, Record<string, string>> = {
     "memory.qmd.limits.timeoutMs": "Per-query timeout for QMD searches (default: 4000).",
     "memory.qmd.scope":
       "Session/channel scope for QMD recall (same syntax as session.sendPolicy; default: direct-only).",
-    "agents.defaults.memorySearch.cache.maxEntries":
-      "Optional cap on cached embeddings (best-effort).",
-    "agents.defaults.memorySearch.sync.onSearch":
-      "Lazy sync: schedule a reindex on search after changes.",
-    "agents.defaults.memorySearch.sync.watch": "Watch memory files for changes (chokidar).",
-    "agents.defaults.memorySearch.sync.sessions.deltaBytes":
-      "Minimum appended bytes before session transcripts trigger reindex (default: 100000).",
-    "agents.defaults.memorySearch.sync.sessions.deltaMessages":
-      "Minimum appended JSONL lines before session transcripts trigger reindex (default: 50).",
     "plugins.enabled": "Enable plugin/extension loading (default: true).",
     "plugins.allow": "Optional allowlist of plugin ids; when set, only listed plugins load.",
     "plugins.deny": "Optional denylist of plugin ids; deny wins over allowlist.",
@@ -503,49 +454,12 @@ const CONFIG_FIELD_HELP: Record<Locale, Record<string, string>> = {
     "agents.defaults.envelopeTimestamp": '在消息信封中包含绝对时间戳（"on" 或 "off"）。',
     "agents.defaults.envelopeElapsed": '在消息信封中包含经过时间（"on" 或 "off"）。',
     "agents.defaults.models": "配置的模型目录（键是完整的提供方/模型 ID）。",
-    "agents.defaults.memorySearch":
-      "对 MEMORY.md 和 memory/*.md 的向量搜索（支持每个代理的覆盖）。",
-    "agents.defaults.memorySearch.sources":
-      '记忆搜索的索引来源（默认：["memory"]；添加 "sessions" 以包含会话转录）。',
-    "agents.defaults.memorySearch.extraPaths":
-      "记忆搜索中包含的额外路径（目录或 .md 文件；相对路径从工作区解析）。",
-    "agents.defaults.memorySearch.experimental.sessionMemory":
-      "启用实验性会话转录索引用于记忆搜索（默认：false）。",
-    "agents.defaults.memorySearch.provider":
-      '嵌入提供方（"openai"、"gemini"、"voyage" 或 "local"）。',
-    "agents.defaults.memorySearch.remote.baseUrl":
-      "远程嵌入的自定义 base URL（OpenAI 兼容代理或 Gemini 覆盖）。",
-    "agents.defaults.memorySearch.remote.apiKey": "远程嵌入提供方的自定义 API 密钥。",
-    "agents.defaults.memorySearch.remote.headers":
-      "远程嵌入的额外请求头（合并；远程覆盖 OpenAI 请求头）。",
-    "agents.defaults.memorySearch.remote.batch.enabled":
-      "启用记忆嵌入的批处理 API（OpenAI/Gemini；默认：true）。",
-    "agents.defaults.memorySearch.remote.batch.wait": "索引时等待批处理完成（默认：true）。",
-    "agents.defaults.memorySearch.remote.batch.concurrency":
-      "记忆索引的最大并发嵌入批处理作业数（默认：2）。",
-    "agents.defaults.memorySearch.remote.batch.pollIntervalMs":
-      "批处理状态轮询间隔（毫秒）（默认：2000）。",
-    "agents.defaults.memorySearch.remote.batch.timeoutMinutes":
-      "批处理索引的超时（分钟）（默认：60）。",
-    "agents.defaults.memorySearch.local.modelPath":
-      "本地 GGUF 模型路径或 hf: URI（node-llama-cpp）。",
-    "agents.defaults.memorySearch.fallback":
-      '嵌入失败时的回退提供方（"openai"、"gemini"、"local" 或 "none"）。',
-    "agents.defaults.memorySearch.store.path":
-      "SQLite 索引路径（默认：~/.openclaw/memory/{agentId}.sqlite）。",
-    "agents.defaults.memorySearch.store.vector.enabled":
-      "启用 sqlite-vec 扩展用于向量搜索（默认：true）。",
-    "agents.defaults.memorySearch.store.vector.extensionPath":
-      "sqlite-vec 扩展库的可选覆盖路径（.dylib/.so/.dll）。",
-    "agents.defaults.memorySearch.query.hybrid.enabled":
-      "启用混合 BM25 + 向量搜索用于记忆（默认：true）。",
-    "agents.defaults.memorySearch.query.hybrid.vectorWeight": "合并结果时向量相似度的权重（0-1）。",
-    "agents.defaults.memorySearch.query.hybrid.textWeight":
-      "合并结果时 BM25 文本相关性的权重（0-1）。",
-    "agents.defaults.memorySearch.query.hybrid.candidateMultiplier":
-      "候选池大小的倍数（默认：4）。",
-    "agents.defaults.memorySearch.cache.enabled":
-      "在 SQLite 中缓存块嵌入以加速重新索引和频繁更新（默认：true）。",
+    "agents.defaults.knowledge":
+      "Obsidian 兼容 Vault 索引，供 memory_search 使用（Vault 与索引路径自动管理）。",
+    "agents.defaults.knowledge.enabled":
+      "启用 Vault 同步与 memory_search 工具（默认：true）。",
+    "agents.defaults.knowledge.vaultDir":
+      "Vault 目录绝对路径；留空则使用 workspace/vault 或 ~/.openocta/vault。",
     memory: "记忆后端配置（全局）。",
     "memory.backend": '记忆后端（"builtin" 用于 OpenClaw 嵌入，"qmd" 用于 QMD 侧车）。',
     "memory.citations": '默认引用行为（"auto"、"on" 或 "off"）。',
@@ -568,13 +482,6 @@ const CONFIG_FIELD_HELP: Record<Locale, Record<string, string>> = {
     "memory.qmd.limits.maxInjectedChars": "每轮从 QMD 命中注入的最大总字符数。",
     "memory.qmd.limits.timeoutMs": "QMD 搜索的每次查询超时（默认：4000）。",
     "memory.qmd.scope": "QMD 召回会话/通道范围（与 session.sendPolicy 相同的语法；默认：仅直接）。",
-    "agents.defaults.memorySearch.cache.maxEntries": "缓存嵌入的可选上限（尽力而为）。",
-    "agents.defaults.memorySearch.sync.onSearch": "懒同步：在更改后搜索时安排重新索引。",
-    "agents.defaults.memorySearch.sync.watch": "监听记忆文件的更改（chokidar）。",
-    "agents.defaults.memorySearch.sync.sessions.deltaBytes":
-      "会话转录触发重新索引前的最小追加字节数（默认：100000）。",
-    "agents.defaults.memorySearch.sync.sessions.deltaMessages":
-      "会话转录触发重新索引前的最小追加 JSONL 行数（默认：50）。",
     "plugins.enabled": "启用插件/扩展加载（默认：true）。",
     "plugins.allow": "插件 id 的可选允许列表；设置时，仅加载列出的插件。",
     "plugins.deny": "插件 id 的可选拒绝列表；拒绝优先于允许列表。",

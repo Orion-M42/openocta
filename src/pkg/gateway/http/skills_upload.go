@@ -123,6 +123,7 @@ func extractSkillFromZip(r io.ReaderAt, size int64) ([]byte, error) {
 
 // handleSkillsUpload handles POST /api/skills/upload (multipart: name, file).
 func (s *Server) handleSkillsUpload(w http.ResponseWriter, r *http.Request) {
+	setSkillsAPICORSHeaders(w)
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -308,7 +309,18 @@ func (s *Server) handleSkillsUpload(w http.ResponseWriter, r *http.Request) {
 	w.Write(marshal)
 }
 
+// setSkillsAPICORSHeaders allows Control UI on another origin (e.g. localhost:5173 → 127.0.0.1:18900).
+func setSkillsAPICORSHeaders(w http.ResponseWriter) {
+	setSiteProxyCORSHeaders(w)
+}
+
+func handleSkillsAPIOptions(w http.ResponseWriter, r *http.Request) {
+	setSkillsAPICORSHeaders(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func writeSkillsUploadError(w http.ResponseWriter, status int, message string, template string) {
+	setSkillsAPICORSHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	payload := map[string]interface{}{"ok": false, "error": message}

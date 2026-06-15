@@ -94,6 +94,30 @@ func (p *Pool) Evict(sessionKey string) {
 	}
 }
 
+// EvictAll closes and removes every pooled runtime (e.g. after knowledge index rebuild).
+func (p *Pool) EvictAll() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	entries := make([]*poolEntry, 0, len(p.entries))
+	for _, ent := range p.entries {
+		if ent != nil {
+			entries = append(entries, ent)
+		}
+	}
+	p.entries = make(map[string]*poolEntry)
+	p.mu.Unlock()
+	for _, ent := range entries {
+		ent.close()
+	}
+}
+
+// EvictAllSessionRuntimes evicts all pooled chat runtimes in this process.
+func EvictAllSessionRuntimes() {
+	defaultPool.EvictAll()
+}
+
 func (e *poolEntry) close() {
 	if e == nil {
 		return

@@ -388,6 +388,17 @@ import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkillLibrary } from "./views/skill-library.ts";
+import { renderKnowledgeVault } from "./views/knowledge-vault.ts";
+import {
+  fetchVaultFile,
+  fetchVaultFiles,
+  fetchVaultGraph,
+  createVaultFile,
+  createVaultFolder,
+  saveVaultFile,
+  syncVaultIndex,
+} from "./controllers/vault.ts";
+import { buildSkillCreateModalProps, openSkillCreateChoice } from "./skill-create-handlers.ts";
 import { renderToolLibrary } from "./views/tool-library.ts";
 import { renderTutorials } from "./views/tutorials.ts";
 import { requestDesktopClearWorkspace, requestDesktopUninstall } from "./controllers/desktop-uninstall.ts";
@@ -579,6 +590,7 @@ export function renderApp(state: AppViewState) {
     isChat ? "shell--chat" : "",
     isCatalogArea ? "shell--catalog" : "",
     state.tab === "tutorials" ? "shell--tutorials" : "",
+    state.tab === "knowledgeVault" ? "shell--knowledge-vault" : "",
     isAgentSwarmPage ? "shell--agent-swarm" : "",
     chatFocus ? "shell--chat-focus" : "",
     isSideNavCollapsed ? "shell--nav-collapsed" : "",
@@ -642,6 +654,7 @@ export function renderApp(state: AppViewState) {
             { tab: "scheduledTasks", label: "定时任务" },
             { tab: "employeeMarket", label: "员工市场" },
             { tab: "skillLibrary", label: "技能库" },
+            { tab: "knowledgeVault", label: "知识库" },
             { tab: "toolLibrary", label: "工具库" },
             { tab: "modelLibrary", label: "模型" },
             { tab: "tutorials", label: "教程" },
@@ -779,7 +792,7 @@ export function renderApp(state: AppViewState) {
         }
         </div>
       </header>
-      ${state.tab === "tutorials" || isAgentSwarmPage
+      ${state.tab === "tutorials" || state.tab === "knowledgeVault" || isAgentSwarmPage
         ? nothing
         : html`<aside
             class="nav ${isCatalogArea ? "nav--catalog" : ""} ${isMessagePage ? "nav--massage" : ""} ${isScheduledTasks || isConfigArea ? "nav--grouped" : ""} ${isSideNavCollapsed ? "nav--collapsed" : ""}"
@@ -1202,8 +1215,8 @@ export function renderApp(state: AppViewState) {
                     : html`<div class="nav-empty"></div>`
         }
       </aside>`}
-      <main class="content ${isChat ? "content--chat" : ""} ${isCatalogArea ? "content--catalog" : ""} ${isAgentSwarmPage ? "content--agent-swarm" : ""} ${state.tab === "tutorials" ? "content--tutorials" : ""} ${state.tab === "tutorials" && state.tutorialsActiveTab === "documentation" ? "content--documentation" : ""} ${state.tab === "llmTrace" && state.llmTraceViewingSessionId != null ? "content--llm-trace-detail" : ""}">
-        ${isCatalogArea || isMessagePage || isAgentSwarmPage
+      <main class="content ${isChat ? "content--chat" : ""} ${isCatalogArea ? "content--catalog" : ""} ${isAgentSwarmPage ? "content--agent-swarm" : ""} ${state.tab === "tutorials" ? "content--tutorials" : ""} ${state.tab === "knowledgeVault" ? "content--knowledge-vault" : ""} ${state.tab === "tutorials" && state.tutorialsActiveTab === "documentation" ? "content--documentation" : ""} ${state.tab === "llmTrace" && state.llmTraceViewingSessionId != null ? "content--llm-trace-detail" : ""}">
+        ${isCatalogArea || isMessagePage || isAgentSwarmPage || state.tab === "knowledgeVault"
           ? nothing
           : html`
               <section class="content-header">
@@ -2037,75 +2050,8 @@ export function renderApp(state: AppViewState) {
                   state.skillLibrarySelectedFolder = null;
                   state.skillLibrarySelectedDetail = null;
                 },
-                addModalOpen: state.skillsAddModalOpen,
-                uploadName: state.skillsUploadName,
-                uploadFiles: state.skillsUploadFiles,
-                uploadError: state.skillsUploadError,
-                uploadTemplate: state.skillsUploadTemplate,
-                uploadBusy: state.skillsUploadBusy,
-                onAddClick: () => {
-                  state.skillsAddModalOpen = true;
-                  state.skillsUploadName = "";
-                  state.skillsUploadFiles = [];
-                  state.skillsUploadError = null;
-                  state.skillsUploadTemplate = null;
-                },
-                onAddClose: () => {
-                  state.skillsAddModalOpen = false;
-                  state.skillsUploadName = "";
-                  state.skillsUploadFiles = [];
-                  state.skillsUploadError = null;
-                  state.skillsUploadTemplate = null;
-                },
-                onUploadNameChange: (next) => (state.skillsUploadName = next),
-                onUploadFilesChange: (files) => (state.skillsUploadFiles = files ?? []),
-                onUploadSubmit: async () => {
-                  const files = state.skillsUploadFiles ?? [];
-                  const name = state.skillsUploadName?.trim() ?? "";
-                  if (files.length === 0) return;
-                  state.skillsUploadBusy = true;
-                  state.skillsUploadError = null;
-                  state.skillLibraryError = null;
-                  const gatewayUrl = state.settings?.gatewayUrl?.trim();
-                  if (!gatewayUrl) {
-                    state.skillsUploadError = "Gateway URL 未配置";
-                    state.skillsUploadBusy = false;
-                    return;
-                  }
-                  const skillState = {
-                    gatewayUrl,
-                    token: state.settings?.token?.trim(),
-                  } as Parameters<typeof uploadSkill>[0];
-                  try {
-                    for (let i = 0; i < files.length; i++) {
-                      const file = files[i];
-                      const skillName =
-                        files.length > 1
-                          ? file.name.replace(/\.(zip|md)$/i, "").replace(/[^a-zA-Z0-9_-]/g, "-")
-                          : name || file.name.replace(/\.(zip|md)$/i, "").replace(/[^a-zA-Z0-9_-]/g, "-");
-                      if (!skillName) {
-                        state.skillsUploadError = "技能名称不能为空";
-                        break;
-                      }
-                      const res = await uploadSkill(skillState, skillName, file);
-                      if (!res.ok) {
-                        state.skillsUploadError = res.error ?? "上传失败";
-                        state.skillsUploadTemplate = res.template ?? null;
-                        break;
-                      }
-                    }
-                    if (!state.skillsUploadError) {
-                      state.skillsAddModalOpen = false;
-                      state.skillsUploadName = "";
-                      state.skillsUploadFiles = [];
-                      state.skillsUploadTemplate = null;
-                      await loadSkills(state);
-                      await onRefresh();
-                    }
-                  } finally {
-                    state.skillsUploadBusy = false;
-                  }
-                },
+                skillCreate: buildSkillCreateModalProps(state, onRefresh),
+                onAddClick: () => openSkillCreateChoice(state),
                 skillEditModalOpen: state.skillLibraryEditModalOpen,
                 skillEditSkillKey: state.skillLibraryEditSkillKey,
                 skillEditFiles: state.skillLibraryEditFiles,
@@ -2195,6 +2141,276 @@ export function renderApp(state: AppViewState) {
                     }, 2000);
                   }
                 },
+                });
+              })()
+            : nothing
+        }
+
+        ${
+          state.tab === "knowledgeVault"
+            ? (() => {
+                const loadVault = async () => {
+                  state.knowledgeVaultLoading = true;
+                  state.knowledgeVaultError = null;
+                  try {
+                    const res = await fetchVaultFiles(state);
+                    state.knowledgeVaultDir = res.vaultDir;
+                    state.knowledgeVaultFiles = res.files;
+                    state.knowledgeVaultFolders = res.folders.map((f) => f.path);
+                  } catch (err) {
+                    state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                  } finally {
+                    state.knowledgeVaultLoading = false;
+                  }
+                };
+                const loadGraph = async () => {
+                  state.knowledgeVaultGraphLoading = true;
+                  try {
+                    state.knowledgeVaultGraph = await fetchVaultGraph(state);
+                  } catch (err) {
+                    state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                  } finally {
+                    state.knowledgeVaultGraphLoading = false;
+                  }
+                };
+                const loadFile = async (path: string) => {
+                  state.knowledgeVaultContentLoading = true;
+                  state.knowledgeVaultError = null;
+                  try {
+                    const file = await fetchVaultFile(state, path);
+                    state.knowledgeVaultContent = file.content;
+                    state.knowledgeVaultDraftContent = file.content;
+                  } catch (err) {
+                    state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                  } finally {
+                    state.knowledgeVaultContentLoading = false;
+                  }
+                };
+                if (!state.knowledgeVaultLoadedOnce && !state.knowledgeVaultLoading) {
+                  state.knowledgeVaultLoadedOnce = true;
+                  queueMicrotask(() => void loadVault());
+                }
+                if (
+                  state.knowledgeVaultViewMode === "graph" &&
+                  !state.knowledgeVaultGraphLoading &&
+                  !state.knowledgeVaultGraph &&
+                  state.knowledgeVaultLoadedOnce
+                ) {
+                  queueMicrotask(() => void loadGraph());
+                }
+                const parentFolderForNew = () => {
+                  const selected = state.knowledgeVaultSelectedPath;
+                  if (!selected) return "";
+                  const slash = selected.lastIndexOf("/");
+                  return slash >= 0 ? selected.slice(0, slash) : "";
+                };
+                const joinVaultPath = (parent: string, name: string) => {
+                  const trimmed = name.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+                  if (!trimmed) return "";
+                  return parent ? `${parent}/${trimmed}` : trimmed;
+                };
+                const expandFolderPath = (folderPath: string) => {
+                  const parts = folderPath.split("/");
+                  const next = new Set(state.knowledgeVaultExpandedFolders);
+                  let acc = "";
+                  for (const part of parts) {
+                    acc = acc ? `${acc}/${part}` : part;
+                    next.add(acc);
+                  }
+                  state.knowledgeVaultExpandedFolders = [...next];
+                };
+                const toggleFolder = (folderPath: string) => {
+                  const set = new Set(state.knowledgeVaultExpandedFolders);
+                  if (set.has(folderPath)) {
+                    set.delete(folderPath);
+                  } else {
+                    set.add(folderPath);
+                  }
+                  state.knowledgeVaultExpandedFolders = [...set];
+                };
+                const syncIndex = async (message?: string) => {
+                  state.knowledgeVaultSyncing = true;
+                  state.knowledgeVaultError = null;
+                  try {
+                    const res = await syncVaultIndex(state);
+                    const files = res.fileCount ?? 0;
+                    const chunks = res.chunkCount ?? 0;
+                    state.knowledgeVaultSaveMessage =
+                      message ??
+                      `索引已同步（${files} 篇笔记，${chunks} 个分块）。Agent 将主动调用 memory_search 检索；若当前会话仍搜不到，请再发一条新消息。`;
+                    window.setTimeout(() => {
+                      state.knowledgeVaultSaveMessage = null;
+                    }, 3000);
+                  } catch (err) {
+                    state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                  } finally {
+                    state.knowledgeVaultSyncing = false;
+                  }
+                };
+                return renderKnowledgeVault({
+                  loading: state.knowledgeVaultLoading,
+                  error: state.knowledgeVaultError,
+                  vaultDir: state.knowledgeVaultDir,
+                  files: state.knowledgeVaultFiles,
+                  folders: state.knowledgeVaultFolders,
+                  viewMode: state.knowledgeVaultViewMode,
+                  selectedPath: state.knowledgeVaultSelectedPath,
+                  expandedFolders: state.knowledgeVaultExpandedFolders,
+                  content: state.knowledgeVaultContent,
+                  contentLoading: state.knowledgeVaultContentLoading,
+                  editMode: state.knowledgeVaultEditMode,
+                  draftContent: state.knowledgeVaultDraftContent,
+                  saving: state.knowledgeVaultSaving,
+                  saveMessage: state.knowledgeVaultSaveMessage,
+                  syncing: state.knowledgeVaultSyncing,
+                  dirSaving: state.knowledgeVaultDirSaving,
+                  graph: state.knowledgeVaultGraph,
+                  graphLoading: state.knowledgeVaultGraphLoading,
+                  query: state.knowledgeVaultQuery,
+                  onRefresh: async () => {
+                    state.knowledgeVaultGraph = null;
+                    await loadVault();
+                    if (state.knowledgeVaultViewMode === "graph") {
+                      await loadGraph();
+                    }
+                    if (state.knowledgeVaultSelectedPath) {
+                      await loadFile(state.knowledgeVaultSelectedPath);
+                    }
+                  },
+                  onSyncIndex: () => syncIndex(),
+                  onViewModeChange: (mode) => {
+                    state.knowledgeVaultViewMode = mode;
+                    if (mode === "graph" && !state.knowledgeVaultGraph) {
+                      void loadGraph();
+                    }
+                  },
+                  onSelectFile: (path) => {
+                    state.knowledgeVaultSelectedPath = path;
+                    state.knowledgeVaultEditMode = false;
+                    state.knowledgeVaultViewMode = "notes";
+                    void loadFile(path);
+                  },
+                  onToggleFolder: toggleFolder,
+                  onQueryChange: (q) => {
+                    state.knowledgeVaultQuery = q;
+                  },
+                  onToggleEdit: () => {
+                    state.knowledgeVaultEditMode = !state.knowledgeVaultEditMode;
+                    if (state.knowledgeVaultEditMode) {
+                      state.knowledgeVaultDraftContent = state.knowledgeVaultContent;
+                    }
+                  },
+                  onDraftChange: (content) => {
+                    state.knowledgeVaultDraftContent = content;
+                  },
+                  onSave: async () => {
+                    const path = state.knowledgeVaultSelectedPath;
+                    if (!path) return;
+                    state.knowledgeVaultSaving = true;
+                    state.knowledgeVaultSaveMessage = null;
+                    try {
+                      await saveVaultFile(state, path, state.knowledgeVaultDraftContent);
+                      state.knowledgeVaultContent = state.knowledgeVaultDraftContent;
+                      state.knowledgeVaultEditMode = false;
+                      state.knowledgeVaultGraph = null;
+                      state.knowledgeVaultSaveMessage = "已保存";
+                      await loadVault();
+                      void syncIndex("已保存并同步索引");
+                    } catch (err) {
+                      state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                    } finally {
+                      state.knowledgeVaultSaving = false;
+                    }
+                  },
+                  onCreateFile: async () => {
+                    const parent = parentFolderForNew();
+                    const defaultName = "未命名笔记";
+                    const name = await nativePrompt(
+                      parent ? `在「${parent}」下新建笔记（无需 .md 后缀）` : "新建笔记名称（无需 .md 后缀）",
+                      defaultName,
+                    );
+                    if (name == null) return;
+                    const filePath = joinVaultPath(parent, name);
+                    if (!filePath) {
+                      await nativeAlert("请输入有效的笔记名称");
+                      return;
+                    }
+                    state.knowledgeVaultError = null;
+                    try {
+                      const file = await createVaultFile(state, filePath);
+                      state.knowledgeVaultGraph = null;
+                      await loadVault();
+                      state.knowledgeVaultSelectedPath = file.path;
+                      state.knowledgeVaultContent = file.content;
+                      state.knowledgeVaultDraftContent = file.content;
+                      state.knowledgeVaultEditMode = true;
+                      state.knowledgeVaultViewMode = "notes";
+                      void syncIndex("已创建笔记并同步索引");
+                    } catch (err) {
+                      state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                    }
+                  },
+                  onCreateFolder: async () => {
+                    const parent = parentFolderForNew();
+                    const name = await nativePrompt(
+                      parent ? `在「${parent}」下新建文件夹` : "新建文件夹名称（可含子路径，如 notes/2024）",
+                      "",
+                    );
+                    if (name == null) return;
+                    const folderPath = joinVaultPath(parent, name);
+                    if (!folderPath) {
+                      await nativeAlert("请输入有效的文件夹名称");
+                      return;
+                    }
+                    state.knowledgeVaultError = null;
+                    try {
+                      await createVaultFolder(state, folderPath);
+                      expandFolderPath(folderPath);
+                      await loadVault();
+                      state.knowledgeVaultSaveMessage = "已创建文件夹";
+                      await loadVault();
+                      window.setTimeout(() => {
+                        state.knowledgeVaultSaveMessage = null;
+                      }, 2000);
+                    } catch (err) {
+                      state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                    }
+                  },
+                  onConfigureVaultDir: async () => {
+                    const current = state.knowledgeVaultDir.trim();
+                    const next = await nativePrompt(
+                      "知识库 Vault 目录（绝对路径，留空则恢复为 workspace/vault 默认路径）",
+                      current,
+                    );
+                    if (next == null) return;
+                    const trimmed = next.trim();
+                    state.knowledgeVaultDirSaving = true;
+                    state.knowledgeVaultError = null;
+                    try {
+                      const patch: Record<string, unknown> = {
+                        agents: {
+                          defaults: {
+                            knowledge: {
+                              enabled: true,
+                              ...(trimmed ? { vaultDir: trimmed } : { vaultDir: null }),
+                            },
+                          },
+                        },
+                      };
+                      await saveConfigPatch(state, patch);
+                      state.knowledgeVaultLoadedOnce = false;
+                      state.knowledgeVaultGraph = null;
+                      state.knowledgeVaultSelectedPath = null;
+                      state.knowledgeVaultContent = "";
+                      state.knowledgeVaultDraftContent = "";
+                      await loadVault();
+                      await syncIndex(trimmed ? "目录已更新并同步索引" : "已恢复默认目录并同步索引");
+                    } catch (err) {
+                      state.knowledgeVaultError = (err as Error)?.message ?? String(err);
+                    } finally {
+                      state.knowledgeVaultDirSaving = false;
+                    }
+                  },
                 });
               })()
             : nothing

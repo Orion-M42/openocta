@@ -7,6 +7,7 @@ import { itemBelongsToCategory } from "../utils/category-helpers.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { nativeConfirm } from "../native-dialog-bridge.ts";
 import { t } from "../strings.js";
+import { renderSkillCreateModals, type SkillCreateModalsProps } from "./skill-create-modals.ts";
 
 /** Skills default icon (layers) - same as skills.ts */
 const SKILL_ICON_SVG = html`
@@ -58,17 +59,8 @@ export type SkillLibraryProps = {
   onRefresh: () => void;
   onSelect: (folder: string) => void;
   onDetailClose?: () => void;
-  addModalOpen: boolean;
-  uploadName: string;
-  uploadFiles: File[];
-  uploadError: string | null;
-  uploadTemplate: string | null;
-  uploadBusy: boolean;
+  skillCreate: SkillCreateModalsProps;
   onAddClick: () => void;
-  onAddClose: () => void;
-  onUploadNameChange: (next: string) => void;
-  onUploadFilesChange: (files: File[]) => void;
-  onUploadSubmit: () => void;
   onInstall?: (folder: string, category?: string) => Promise<void>;
   onDelete?: (folder: string) => Promise<void>;
   onToggleEnabled?: (folder: string, enabled: boolean) => Promise<void>;
@@ -509,96 +501,7 @@ export function renderSkillLibrary(props: SkillLibraryProps) {
                 `
               : nothing}
 
-            ${props.addModalOpen
-              ? html`
-                  <div class="modal-overlay" @click=${props.onAddClose}>
-                    <div class="modal card" @click=${(e: Event) => e.stopPropagation()}>
-                      <div class="card-title">${t("skillsAddSkill")}</div>
-                      <div class="field" style="margin-top: 12px;">
-                        <span>${t("skillsUploadName")}</span>
-                        <span class="input"><input
-                          type="text"
-                          .value=${props.uploadName}
-                          @input=${(e: Event) =>
-                            props.onUploadNameChange((e.target as HTMLInputElement).value)}
-                          placeholder=${t("skillsUploadNamePlaceholder")}
-                          ?disabled=${props.uploadFiles.length > 1}
-                        /></span>
-                        ${props.uploadFiles.length > 1
-                          ? html`
-                              <div class="muted" style="margin-top: 4px; font-size: 0.9em;">
-                                已选择多个压缩包：将自动从每个文件名提取技能名称（此处无需填写）。
-                              </div>
-                            `
-                          : nothing}
-                      </div>
-                      <div class="field" style="margin-top: 12px;">
-                        <span>${t("skillsUploadFile")}</span>
-                        <input
-                          type="file"
-                          accept=".md,.zip"
-                          multiple
-                          @change=${(e: Event) => {
-                            const input = e.target as HTMLInputElement;
-                            const files = input.files ? Array.from(input.files) : [];
-                            props.onUploadFilesChange(files);
-                          }}
-                        />
-                        <div class="muted" style="margin-top: 4px; font-size: 0.9em;">
-                          ${t("skillsUploadFileHint")}
-                        </div>
-                        ${props.uploadFiles.length > 0
-                          ? html`
-                              <div class="row" style="flex-wrap: wrap; gap: 4px; margin-top: 8px;">
-                                ${props.uploadFiles.map(
-                                  (f) => html`<span class="chip" style="font-size: 12px;">${f.name}</span>`,
-                                )}
-                              </div>
-                            `
-                          : nothing}
-                      </div>
-                      ${props.uploadError
-                        ? html`
-                            <div class="callout danger" style="margin-top: 12px;">
-                              ${props.uploadError}
-                            </div>
-                          `
-                        : nothing}
-                      ${props.uploadTemplate
-                        ? html`
-                            <details class="muted" style="margin-top: 12px;">
-                              <summary>Template</summary>
-                              <pre
-                                style="
-                                  margin-top: 8px;
-                                  padding: 12px;
-                                  background: var(--bg-content, #f5f5f5);
-                                  border-radius: 6px;
-                                  overflow: auto;
-                                  max-height: 200px;
-                                  font-size: 0.85em;
-                                  white-space: pre-wrap;
-                                "
-                              >${props.uploadTemplate}</pre>
-                            </details>
-                          `
-                        : nothing}
-                      <div class="row" style="margin-top: 16px; justify-content: flex-end; gap: 8px;">
-                        <button class="btn" ?disabled=${props.uploadBusy} @click=${props.onAddClose}>
-                          ${t("commonCancel")}
-                        </button>
-                        <button
-                          class="btn primary"
-                          ?disabled=${props.uploadBusy || props.uploadFiles.length === 0 || (props.uploadFiles.length === 1 && !props.uploadName.trim())}
-                          @click=${props.onUploadSubmit}
-                        >
-                          ${props.uploadBusy ? t("commonLoading") : t("skillsUploadSubmit")}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                `
-              : nothing}
+            ${renderSkillCreateModals(props.skillCreate)}
 
             ${props.loading
               ? html`<div class="emp-loading">加载中...</div>`

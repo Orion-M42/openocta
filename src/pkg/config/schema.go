@@ -502,7 +502,7 @@ type AgentDefaultsConfig struct {
 	CliBackends            map[string]CliBackendConfig      `json:"cliBackends,omitempty"`
 	ContextPruning         *AgentContextPruningConfig       `json:"contextPruning,omitempty"`
 	Compaction             *AgentCompactionConfig           `json:"compaction,omitempty"`
-	MemorySearch           *MemorySearchConfig              `json:"memorySearch,omitempty"`
+	Knowledge              *KnowledgeConfig                 `json:"knowledge,omitempty"`
 	ThinkingDefault        *string                          `json:"thinkingDefault,omitempty"`
 	VerboseDefault         *string                          `json:"verboseDefault,omitempty"`
 	ElevatedDefault        *string                          `json:"elevatedDefault,omitempty"`
@@ -519,16 +519,12 @@ type AgentDefaultsConfig struct {
 	MaxConcurrent          *int                             `json:"maxConcurrent,omitempty"`
 	Subagents              *AgentSubagentsConfig            `json:"subagents,omitempty"`
 	Sandbox                *AgentSandboxConfig              `json:"sandbox,omitempty"`
-	// Skylark enables agentsdk-go progressive retrieval (see agentsdk-go docs/skylark.md). When omitted, runtime stays off unless OPENOCTA_SKYLARK enables it or agents.defaults.skylark is set.
-	Skylark *SkylarkConfig `json:"skylark,omitempty"`
 }
 
-// SkylarkConfig maps to api.SkylarkOptions (Bleve index under .agents/skylark by default).
-type SkylarkConfig struct {
-	Enabled          *bool  `json:"enabled,omitempty"`
-	DataDir          string `json:"dataDir,omitempty"`
-	DisableEmbedding *bool  `json:"disableEmbedding,omitempty"`
-	KeepAutoSkills   *bool  `json:"keepAutoSkills,omitempty"`
+// KnowledgeConfig enables Obsidian-compatible vault indexing (memory_search / session_search).
+type KnowledgeConfig struct {
+	Enabled  *bool   `json:"enabled,omitempty"`
+	VaultDir *string `json:"vaultDir,omitempty"`
 }
 
 // AgentModelListConfig holds model list configuration.
@@ -682,21 +678,21 @@ type AgentSandboxConfig struct {
 
 // AgentConfig holds a single agent.
 type AgentConfig struct {
-	ID           string                `json:"id"`
-	Default      *bool                 `json:"default,omitempty"`
-	Name         string                `json:"name,omitempty"`
-	Workspace    string                `json:"workspace,omitempty"`
-	AgentDir     string                `json:"agentDir,omitempty"`
-	Model        interface{}           `json:"model,omitempty"` // string or {primary,fallbacks}
-	Skills       []string              `json:"skills,omitempty"`
-	MemorySearch *MemorySearchConfig   `json:"memorySearch,omitempty"`
-	HumanDelay   *HumanDelayConfig     `json:"humanDelay,omitempty"`
-	Heartbeat    *AgentHeartbeatConfig `json:"heartbeat,omitempty"`
-	Identity     *IdentityConfig       `json:"identity,omitempty"`
-	GroupChat    *GroupChatConfig      `json:"groupChat,omitempty"`
-	Subagents    *AgentSubagentsConfig `json:"subagents,omitempty"`
-	Sandbox      *AgentSandboxConfig   `json:"sandbox,omitempty"`
-	Tools        *AgentToolsConfig     `json:"tools,omitempty"`
+	ID         string                `json:"id"`
+	Default    *bool                 `json:"default,omitempty"`
+	Name       string                `json:"name,omitempty"`
+	Workspace  string                `json:"workspace,omitempty"`
+	AgentDir   string                `json:"agentDir,omitempty"`
+	Model      interface{}           `json:"model,omitempty"` // string or {primary,fallbacks}
+	Skills     []string              `json:"skills,omitempty"`
+	Knowledge  *KnowledgeConfig      `json:"knowledge,omitempty"`
+	HumanDelay *HumanDelayConfig     `json:"humanDelay,omitempty"`
+	Heartbeat  *AgentHeartbeatConfig `json:"heartbeat,omitempty"`
+	Identity   *IdentityConfig       `json:"identity,omitempty"`
+	GroupChat  *GroupChatConfig      `json:"groupChat,omitempty"`
+	Subagents  *AgentSubagentsConfig `json:"subagents,omitempty"`
+	Sandbox    *AgentSandboxConfig   `json:"sandbox,omitempty"`
+	Tools      *AgentToolsConfig     `json:"tools,omitempty"`
 }
 
 // IdentityConfig holds identity configuration.
@@ -1414,115 +1410,6 @@ type AgentToolsConfig struct {
 // AgentToolsSandboxConfig holds agent tools sandbox configuration.
 type AgentToolsSandboxConfig struct {
 	Tools *ToolsSandboxToolsConfig `json:"tools,omitempty"`
-}
-
-// MemorySearchConfig holds memory search configuration.
-type MemorySearchConfig struct {
-	Enabled      *bool                           `json:"enabled,omitempty"`
-	Sources      []string                        `json:"sources,omitempty"` // "memory" | "sessions"
-	ExtraPaths   []string                        `json:"extraPaths,omitempty"`
-	Experimental *MemorySearchExperimentalConfig `json:"experimental,omitempty"`
-	Provider     *string                         `json:"provider,omitempty"` // "openai" | "gemini" | "local" | "voyage"
-	Remote       *MemorySearchRemoteConfig       `json:"remote,omitempty"`
-	Fallback     *string                         `json:"fallback,omitempty"`
-	Model        *string                         `json:"model,omitempty"`
-	Local        *MemorySearchLocalConfig        `json:"local,omitempty"`
-	Store        *MemorySearchStoreConfig        `json:"store,omitempty"`
-	Chunking     *MemorySearchChunkingConfig     `json:"chunking,omitempty"`
-	Sync         *MemorySearchSyncConfig         `json:"sync,omitempty"`
-	Query        *MemorySearchQueryConfig        `json:"query,omitempty"`
-	Cache        *MemorySearchCacheConfig        `json:"cache,omitempty"`
-}
-
-// MemorySearchExperimentalConfig holds experimental memory search settings.
-type MemorySearchExperimentalConfig struct {
-	SessionMemory *bool `json:"sessionMemory,omitempty"`
-}
-
-// MemorySearchRemoteConfig holds remote memory search configuration.
-type MemorySearchRemoteConfig struct {
-	BaseURL *string                        `json:"baseUrl,omitempty"`
-	APIKey  *string                        `json:"apiKey,omitempty"`
-	Headers map[string]string              `json:"headers,omitempty"`
-	Batch   *MemorySearchRemoteBatchConfig `json:"batch,omitempty"`
-}
-
-// MemorySearchRemoteBatchConfig holds batch configuration.
-type MemorySearchRemoteBatchConfig struct {
-	Enabled        *bool `json:"enabled,omitempty"`
-	Wait           *bool `json:"wait,omitempty"`
-	Concurrency    *int  `json:"concurrency,omitempty"`
-	PollIntervalMs *int  `json:"pollIntervalMs,omitempty"`
-	TimeoutMinutes *int  `json:"timeoutMinutes,omitempty"`
-}
-
-// MemorySearchLocalConfig holds local memory search configuration.
-type MemorySearchLocalConfig struct {
-	ModelPath     *string `json:"modelPath,omitempty"`
-	ModelCacheDir *string `json:"modelCacheDir,omitempty"`
-}
-
-// MemorySearchStoreConfig holds store configuration.
-type MemorySearchStoreConfig struct {
-	Driver *string                        `json:"driver,omitempty"` // "sqlite"
-	Path   *string                        `json:"path,omitempty"`
-	Vector *MemorySearchStoreVectorConfig `json:"vector,omitempty"`
-	Cache  *MemorySearchStoreCacheConfig  `json:"cache,omitempty"`
-}
-
-// MemorySearchStoreVectorConfig holds vector store configuration.
-type MemorySearchStoreVectorConfig struct {
-	Enabled       *bool   `json:"enabled,omitempty"`
-	ExtensionPath *string `json:"extensionPath,omitempty"`
-}
-
-// MemorySearchStoreCacheConfig holds store cache configuration.
-type MemorySearchStoreCacheConfig struct {
-	Enabled    *bool `json:"enabled,omitempty"`
-	MaxEntries *int  `json:"maxEntries,omitempty"`
-}
-
-// MemorySearchChunkingConfig holds chunking configuration.
-type MemorySearchChunkingConfig struct {
-	Tokens  *int `json:"tokens,omitempty"`
-	Overlap *int `json:"overlap,omitempty"`
-}
-
-// MemorySearchSyncConfig holds sync configuration.
-type MemorySearchSyncConfig struct {
-	OnSessionStart  *bool                           `json:"onSessionStart,omitempty"`
-	OnSearch        *bool                           `json:"onSearch,omitempty"`
-	Watch           *bool                           `json:"watch,omitempty"`
-	WatchDebounceMs *int                            `json:"watchDebounceMs,omitempty"`
-	IntervalMinutes *int                            `json:"intervalMinutes,omitempty"`
-	Sessions        *MemorySearchSyncSessionsConfig `json:"sessions,omitempty"`
-}
-
-// MemorySearchSyncSessionsConfig holds sessions sync configuration.
-type MemorySearchSyncSessionsConfig struct {
-	DeltaBytes    *int `json:"deltaBytes,omitempty"`
-	DeltaMessages *int `json:"deltaMessages,omitempty"`
-}
-
-// MemorySearchQueryConfig holds query configuration.
-type MemorySearchQueryConfig struct {
-	MaxResults *int                           `json:"maxResults,omitempty"`
-	MinScore   *float64                       `json:"minScore,omitempty"`
-	Hybrid     *MemorySearchQueryHybridConfig `json:"hybrid,omitempty"`
-}
-
-// MemorySearchQueryHybridConfig holds hybrid query configuration.
-type MemorySearchQueryHybridConfig struct {
-	Enabled             *bool    `json:"enabled,omitempty"`
-	VectorWeight        *float64 `json:"vectorWeight,omitempty"`
-	TextWeight          *float64 `json:"textWeight,omitempty"`
-	CandidateMultiplier *int     `json:"candidateMultiplier,omitempty"`
-}
-
-// MemorySearchCacheConfig holds cache configuration.
-type MemorySearchCacheConfig struct {
-	Enabled    *bool `json:"enabled,omitempty"`
-	MaxEntries *int  `json:"maxEntries,omitempty"`
 }
 
 // BroadcastConfig holds broadcast settings.

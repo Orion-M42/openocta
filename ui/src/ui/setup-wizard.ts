@@ -145,7 +145,7 @@ export function setupWizardStepDescription(step: SetupWizardStepId): string {
     case "resources":
       return "按需安装技能、数字员工、MCP 工具，或配置 IM 通道；本步骤可跳过。";
     case "scenarios":
-      return "请选择一个场景模板，系统将自动安装相关 Skill、MCP，并写入环境变量到 openocta.json。";
+      return "请选择一个场景模板，系统将自动安装相关 Skill 与运行依赖。";
     case "summary":
       return "以下是本次引导中的配置与安装摘要，确认后即可开始使用。";
   }

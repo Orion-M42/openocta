@@ -1627,7 +1627,8 @@ button.nav-item {
   --shell-nav-width: 240px;
 }
 
-.shell--tutorials {
+.shell--tutorials,
+.shell--knowledge-vault {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     "topbar"

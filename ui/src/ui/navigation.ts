@@ -17,6 +17,7 @@ export type Tab =
   | "cronHistory"
   | "employeeMarket"
   | "skillLibrary"
+  | "knowledgeVault"
   | "toolLibrary"
   | "modelLibrary"
   | "tutorials"
@@ -49,6 +50,7 @@ const TAB_PATHS: Record<Tab, string> = {
   cronHistory: "/cron-history",
   employeeMarket: "/employee-market",
   skillLibrary: "/skill-library",
+  knowledgeVault: "/knowledge-vault",
   toolLibrary: "/tool-library",
   modelLibrary: "/model-library",
   tutorials: "/tutorials",
@@ -83,6 +85,7 @@ const ACTIVE_TOP_TAB_ICONS: Partial<Record<Tab, IconName>> = {
   scheduledTasks: "alarmClockActive",
   employeeMarket: "usersActive",
   skillLibrary: "zapActive",
+  knowledgeVault: "documentation",
   toolLibrary: "wrenchActive",
   modelLibrary: "modelCubeActive",
   tutorials: "bookActive",
@@ -191,6 +194,8 @@ export function iconForTab(tab: Tab, active = false): IconName {
       return "users";
     case "skillLibrary":
       return "zap";
+    case "knowledgeVault":
+      return "fileText";
     case "toolLibrary":
       return "wrench";
     case "modelLibrary":
@@ -258,6 +263,8 @@ export function titleForTab(tab: Tab) {
       return "员工市场";
     case "skillLibrary":
       return "技能库";
+    case "knowledgeVault":
+      return "知识库";
     case "toolLibrary":
       return "工具库";
     case "modelLibrary":

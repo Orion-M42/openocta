@@ -11,7 +11,7 @@ import (
 	"github.com/stellarlinkco/agentsdk-go/pkg/api"
 )
 
-// 以下环境变量在 config.env.vars 通过 Options.Env 注入时同样生效（与 OPENOCTA_SKYLARK 一致）。
+// 以下环境变量在 config.env.vars 通过 Options.Env 注入时同样生效。
 const (
 	// EnvAgentRunTimeout：单次 Run/RunStream 在传入的 context 尚未带 deadline 时追加的上限。
 	// Go duration 语法（如 10m、600s、1h）或非负整数秒。未设置时默认 DefaultAgentRunTimeout。

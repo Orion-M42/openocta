@@ -107,7 +107,7 @@ function getToolSections() {
             label: t("agentsMemory"),
             tools: [
                 {id: "memory_search", label: "memory_search", description: t("agentsMemorySearch")},
-                {id: "memory_get", label: "memory_get", description: t("agentsMemoryGet")},
+                {id: "session_search", label: "session_search", description: t("agentsSessionSearch")},
             ],
         },
         {

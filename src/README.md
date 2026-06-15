@@ -85,7 +85,7 @@ src_go/
 | Cron | `pkg/cron/` | 任务 CRUD、存储、调度 |
 | Config | `pkg/config/` | OpenOctaConfig schema、JSON 解析 |
 | Auto-reply | `pkg/autoreply/` | Dispatcher、ReplyPayload、串行队列 |
-| Memory | `pkg/memory/` | Manager 接口、NoopManager 骨架 |
+| Knowledge | agentsdk `Knowledge` + `vault/` | Obsidian Vault 索引、`memory_search` / `session_search` |
 
 ## 文档链接
 

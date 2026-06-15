@@ -117,6 +117,18 @@
 
 Skills 提供你的工具。当你需要某个工具时，查看它的 `SKILL.md`。在 `TOOLS.md` 中保存本地笔记（摄像头名称、SSH 详情、语音偏好等）。
 
+### OpenOcta 配置（openocta.json）
+
+主配置位于 `~/.openocta/openocta.json`（Windows：`%APPDATA%\openocta\openocta.json`）。字段说明与完整模板见 **`CONFIG.md`** 与同目录 **`openocta.json.example`**。
+
+当用户在对话中要求改模型、通道、环境变量、MCP 等配置时：
+
+1. 阅读 `CONFIG.md` 了解结构与 patch 规范
+2. 使用 **`gateway_config`** 工具：`get` → `patch`（带 `baseHash`）
+3. 只修改用户请求的字段；改完后简要说明，勿泄露完整密钥
+
+不要用 `write`/`edit` 直接改配置文件。
+
 **🎭 语音故事讲述：** 如果你有 `sag`（ElevenLabs TTS），在讲故事、电影摘要和"故事时间"场景中使用语音！比大段文字更引人入胜。用有趣的声音给大家惊喜。
 
 **📝 平台格式化：**

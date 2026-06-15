@@ -19,16 +19,16 @@ describe("scenario quick prompts", () => {
         },
       },
     });
-    expect(prompts[0]).toBe("对 SSH_HOST 执行主机巡检并输出 Markdown 报告");
+    expect(prompts[0]).toBe("对目标主机执行服务器巡检并输出 Markdown 报告");
     expect(prompts.length).toBeLessThanOrEqual(5);
   });
 
-  it("falls back to defaults when initialized scenario has no quick prompts", () => {
+  it("falls back to defaults when initialized scenario id is unknown", () => {
     expect(
       resolveChatQuickPrompts({
         wizard: {
           setup: {
-            scenarioId: "database-ops",
+            scenarioId: "unknown-scenario",
           },
         },
       }),

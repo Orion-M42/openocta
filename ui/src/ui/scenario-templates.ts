@@ -81,13 +81,16 @@ export function readInitializedScenarioId(
   return typeof scenarioId === "string" && scenarioId.trim() ? scenarioId.trim() : null;
 }
 
+/** 场景列表底部提示：更多场景尚未开放 */
+export const SCENARIO_COMING_SOON_HINT = "更多场景即将推出，敬请期待。";
+
 /** Built-in scenario templates; scripts live under repo `scenarios/<id>/`. */
 export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
   {
     id: "host-inspection",
     name: "主机巡检场景",
     summary:
-      "定期巡检主机 CPU、内存、磁盘与服务状态。自动安装 Ansible 运维 Skill 与 Prometheus MCP，并提示配置 SSH 凭据环境变量。",
+      "定期巡检主机 CPU、内存、磁盘与服务状态。自动安装 Server Patrol 巡检 Skill，并准备 SSH 客户端离线包。",
     readmePath: "scenarios/host-inspection/README.md",
     initScriptPaths: {
       sh: "scenarios/host-inspection/init.sh",
@@ -96,9 +99,8 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
       bat: "scenarios/host-inspection/init.bat",
     },
     quickPrompts: [
-      "对 SSH_HOST 执行主机巡检并输出 Markdown 报告",
+      "对目标主机执行服务器巡检并输出 Markdown 报告",
       "检查目标主机 CPU、内存、磁盘使用情况",
-      "查询 Prometheus 最近 15 分钟的主机告警",
       "帮我梳理主机异常排查思路，并给出优先级",
       "你能告诉我你有哪些技能吗？",
     ],
@@ -106,180 +108,20 @@ export const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
       {
         kind: "skill",
         ref: {
-          id: "ansible-ops",
-          name: "AnsibleOps",
-          description: "Ansible 运维专家：自动化部署、配置管理与故障排查",
-          downloadUrl: "https://openocta.com/api/v1/skills/ansible-ops/download",
+          id: "server-patrol",
+          name: "Server Patrol",
+          description: "服务器巡检：主机健康检查与巡检报告生成",
+          downloadUrl: "https://openocta.com/api/v1/skills/server-patrol/download",
           category: "运维",
-        },
-      },
-      {
-        kind: "mcp",
-        ref: {
-          id: "26",
-          name: "Prometheus-MCP",
-          description: "Prometheus 监控数据查询与告警管理 MCP",
-          downloadUrl: "https://openocta.com/api/v1/mcps/26/download",
-          category: "运维",
-        },
-      },
-      {
-        kind: "env",
-        ref: {
-          name: "SSH_HOST",
-          description: "默认 SSH 巡检目标主机",
-          required: true,
-          example: "192.168.1.10",
-        },
-      },
-      {
-        kind: "env",
-        ref: {
-          name: "SSH_USER",
-          description: "SSH 登录用户名",
-          required: true,
-          example: "ops",
         },
       },
       {
         kind: "tool",
         ref: {
           name: "openssh-clients",
-          description: "SSH 客户端（离线包，可选）",
+          description: "SSH 客户端（离线包）",
           platform: "linux-deb",
           relativePath: "scenarios/host-inspection/bundled/.gitkeep",
-        },
-      },
-    ],
-  },
-  {
-    id: "database-ops",
-    name: "数据库运维场景",
-    summary:
-      "慢查询分析、备份校验与连接健康检查。安装数据库运维 Skill 与 SQL MCP，并配置数据库连接环境变量。",
-    readmePath: "scenarios/database-ops/README.md",
-    initScriptPaths: {
-      sh: "scenarios/database-ops/init.sh",
-      ps1: "scenarios/database-ops/init.ps1",
-      cmd: "scenarios/database-ops/init.cmd",
-      bat: "scenarios/database-ops/init.bat",
-    },
-    tasks: [
-      {
-        kind: "skill",
-        ref: {
-          id: "postgres-patterns",
-          name: "postgres-patterns",
-          description: "PostgreSQL 最佳实践与 SQL 分析参考",
-          downloadUrl: "https://openocta.com/api/v1/skills/postgres-patterns/download",
-          category: "数据库",
-        },
-      },
-      {
-        kind: "mcp",
-        ref: {
-          id: "25",
-          name: "MySQL-MCP",
-          description: "MySQL 数据库运维与查询 MCP",
-          downloadUrl: "https://openocta.com/api/v1/mcps/25/download",
-          category: "数据库",
-        },
-      },
-      {
-        kind: "env",
-        ref: {
-          name: "DB_DSN",
-          description: "数据库连接串（不含密码时可拆分为 DB_HOST/DB_USER）",
-          required: true,
-          example: "postgres://user@localhost:5432/app",
-        },
-      },
-    ],
-  },
-  {
-    id: "k8s-incident",
-    name: "K8s 处置场景",
-    summary:
-      "Pod 异常、事件与日志聚合排查。安装 Kubernetes 运维 Skill 与集群 MCP，并配置 kubeconfig 路径。",
-    readmePath: "scenarios/k8s-incident/README.md",
-    initScriptPaths: {
-      sh: "scenarios/k8s-incident/init.sh",
-      ps1: "scenarios/k8s-incident/init.ps1",
-      cmd: "scenarios/k8s-incident/init.cmd",
-      bat: "scenarios/k8s-incident/init.bat",
-    },
-    tasks: [
-      {
-        kind: "skill",
-        ref: {
-          id: "kubernetes-devops",
-          name: "kubernetes-devops",
-          description: "Kubernetes 清单生成与集群运维技能",
-          downloadUrl: "https://openocta.com/api/v1/skills/kubernetes-devops/download",
-          category: "云原生",
-        },
-      },
-      {
-        kind: "mcp",
-        ref: {
-          id: "23",
-          name: "k8s-MCP",
-          description: "Kubernetes 集群资源查询与管理 MCP",
-          downloadUrl: "https://openocta.com/api/v1/mcps/23/download",
-          category: "云原生",
-        },
-      },
-      {
-        kind: "env",
-        ref: {
-          name: "KUBECONFIG",
-          description: "kubeconfig 文件路径",
-          required: true,
-          example: "~/.kube/config",
-        },
-      },
-    ],
-  },
-  {
-    id: "browser-office",
-    name: "浏览器操作办公场景",
-    summary:
-      "网页填报、表单抓取与办公自动化。安装浏览器自动化 Skill 与 Browser MCP，可选配置代理环境变量。",
-    readmePath: "scenarios/browser-office/README.md",
-    initScriptPaths: {
-      sh: "scenarios/browser-office/init.sh",
-      ps1: "scenarios/browser-office/init.ps1",
-      cmd: "scenarios/browser-office/init.cmd",
-      bat: "scenarios/browser-office/init.bat",
-    },
-    tasks: [
-      {
-        kind: "skill",
-        ref: {
-          id: "browserless-agent",
-          name: "browserless-agent",
-          description: "Headless 浏览器网页自动化技能",
-          downloadUrl: "https://openocta.com/api/v1/skills/browserless-agent/download",
-          category: "自动化",
-        },
-      },
-      {
-        kind: "mcp",
-        ref: {
-          id: "27",
-          name: "playwright-MCP",
-          description: "Playwright 浏览器自动化 MCP",
-          downloadUrl: "https://openocta.com/api/v1/mcps/27/download",
-          category: "自动化",
-        },
-      },
-      {
-        kind: "env",
-        ref: {
-          name: "HTTP_PROXY",
-          description: "可选 HTTP 代理",
-          required: false,
-          example: "http://127.0.0.1:7890",
         },
       },
     ],

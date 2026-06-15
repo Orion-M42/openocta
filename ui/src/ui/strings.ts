@@ -691,7 +691,7 @@ type Strings = {
   agentsWebSearch: string;
   agentsWebFetch: string;
   agentsMemorySearch: string;
-  agentsMemoryGet: string;
+  agentsSessionSearch: string;
   agentsSessionsList: string;
   agentsSessionsHistory: string;
   agentsSessionsSend: string;
@@ -1709,8 +1709,8 @@ const EN: Strings = {
   agentsProcess: "Manage background processes",
   agentsWebSearch: "Search the web",
   agentsWebFetch: "Fetch web content",
-  agentsMemorySearch: "Semantic search",
-  agentsMemoryGet: "Read memory files",
+  agentsMemorySearch: "Search knowledge vault",
+  agentsSessionSearch: "Search current session history",
   agentsSessionsList: "List sessions",
   agentsSessionsHistory: "Session history",
   agentsSessionsSend: "Send to session",
@@ -2723,8 +2723,8 @@ const ZH: Strings = {
   agentsProcess: "管理后台进程",
   agentsWebSearch: "网页搜索",
   agentsWebFetch: "抓取网页内容",
-  agentsMemorySearch: "语义搜索",
-  agentsMemoryGet: "读取记忆文件",
+  agentsMemorySearch: "搜索知识库 Vault",
+  agentsSessionSearch: "搜索当前会话历史",
   agentsSessionsList: "列出会话",
   agentsSessionsHistory: "会话历史",
   agentsSessionsSend: "发送到会话",
